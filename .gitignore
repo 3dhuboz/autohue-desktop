@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.vite/
+renderer/dist/
+worker/output/
+worker/uploads/
+worker/thumbs/
+worker/classify-tmp/
+worker/*.db
+*.db
+.env
+.env.local

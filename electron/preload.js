@@ -1,0 +1,32 @@
+const { contextBridge, ipcRenderer } = require('electron');
+
+contextBridge.exposeInMainWorld('electronAPI', {
+  // License
+  getLicense: () => ipcRenderer.invoke('license:get'),
+  activateLicense: (key) => ipcRenderer.invoke('license:activate', key),
+  checkQuota: (count) => ipcRenderer.invoke('license:checkQuota', count),
+  recordUsage: (sessionId, count, colorCounts) =>
+    ipcRenderer.invoke('license:recordUsage', sessionId, count, colorCounts),
+
+  // File dialogs
+  openFolder: () => ipcRenderer.invoke('dialog:openFolder'),
+  openFiles: () => ipcRenderer.invoke('dialog:openFiles'),
+  selectOutputFolder: () => ipcRenderer.invoke('dialog:selectOutputFolder'),
+  openInExplorer: (folderPath) => ipcRenderer.invoke('shell:openFolder', folderPath),
+
+  // Settings
+  getSetting: (key) => ipcRenderer.invoke('settings:get', key),
+  setSetting: (key, value) => ipcRenderer.invoke('settings:set', key, value),
+
+  // History
+  getHistory: () => ipcRenderer.invoke('history:list'),
+  deleteHistory: (id) => ipcRenderer.invoke('history:delete', id),
+
+  // Worker
+  getWorkerHealth: () => ipcRenderer.invoke('worker:health'),
+  getWorkerPort: () => ipcRenderer.invoke('worker:port'),
+
+  // App info
+  getVersion: () => ipcRenderer.invoke('app:version'),
+  getUserDataPath: () => ipcRenderer.invoke('app:userData'),
+});
