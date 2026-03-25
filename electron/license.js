@@ -13,7 +13,7 @@ const TIERS = {
 const GRACE_PERIOD_MS = 7 * 24 * 60 * 60 * 1000;
 
 // License validation API endpoint (configure for your domain)
-const VALIDATION_API = process.env.LICENSE_API_URL || 'https://autohue.app/api/license/validate';
+const VALIDATION_API = process.env.LICENSE_API_URL || 'https://autohue-api.steve-700.workers.dev/api/license/validate';
 
 class LicenseManager {
   constructor(db) {
