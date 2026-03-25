@@ -4,9 +4,9 @@ const os = require('os');
 // License tier definitions
 const TIERS = {
   TRL: { name: 'Trial', dailyLimit: 50, label: 'trial' },
-  HOB: { name: 'Hobbyist', dailyLimit: 500, label: 'hobbyist' },
-  PRO: { name: 'Pro', dailyLimit: 5000, label: 'pro' },
-  UNL: { name: 'Unlimited', dailyLimit: -1, label: 'unlimited' },
+  HOB: { name: 'Hobbyist', dailyLimit: 300, label: 'hobbyist' },
+  PRO: { name: 'Pro', dailyLimit: 2000, label: 'pro' },
+  UNL: { name: 'Unlimited', dailyLimit: 10000, label: 'unlimited' },
 };
 
 // Grace period: 7 days offline before requiring re-validation
@@ -23,11 +23,26 @@ class LicenseManager {
 
   /** Generate a stable machine identifier from hardware info. */
   _generateMachineId() {
+    // Get MAC address of primary network interface
+    let mac = 'unknown';
+    const interfaces = os.networkInterfaces();
+    for (const name of Object.keys(interfaces)) {
+      for (const iface of interfaces[name]) {
+        if (!iface.internal && iface.mac && iface.mac !== '00:00:00:00:00:00') {
+          mac = iface.mac;
+          break;
+        }
+      }
+      if (mac !== 'unknown') break;
+    }
+
     const parts = [
       os.hostname(),
       os.platform(),
       os.arch(),
       os.cpus()[0]?.model || 'unknown',
+      mac,
+      String(os.totalmem()),
     ];
     return crypto.createHash('sha256').update(parts.join('|')).digest('hex').slice(0, 32);
   }
@@ -70,7 +85,17 @@ class LicenseManager {
       };
     }
 
-    // Check grace period
+    // Check cached subscription status — if cancelled, block immediately
+    if (row.subscription_status === 'cancelled') {
+      return {
+        active: false,
+        reason: 'subscription_cancelled',
+        tier: row.tier,
+        tierName: TIERS[row.tier.toUpperCase().slice(0, 3)]?.name || row.tier,
+      };
+    }
+
+    // Check grace period (7 days offline tolerance)
     const lastValidated = new Date(row.last_validated);
     const msSinceValidation = Date.now() - lastValidated.getTime();
     const offlineMode = msSinceValidation > 0; // if any time has passed since last check
@@ -84,6 +109,19 @@ class LicenseManager {
         tierName: TIERS[row.tier.toUpperCase().slice(0, 3)]?.name || row.tier,
         lastValidated: row.last_validated,
         daysOverdue: Math.floor(msSinceValidation / (24 * 60 * 60 * 1000)) - 7,
+      };
+    }
+
+    // Monthly heartbeat: block if last_validated is older than 30 days and subscription was active
+    const MONTHLY_HEARTBEAT_MS = 30 * 24 * 60 * 60 * 1000;
+    if (msSinceValidation > MONTHLY_HEARTBEAT_MS && row.subscription_status === 'active') {
+      return {
+        active: false,
+        reason: 'heartbeat_overdue',
+        tier: row.tier,
+        tierName: TIERS[row.tier.toUpperCase().slice(0, 3)]?.name || row.tier,
+        lastValidated: row.last_validated,
+        daysOverdue: Math.floor(msSinceValidation / (24 * 60 * 60 * 1000)),
       };
     }
 
@@ -150,10 +188,12 @@ class LicenseManager {
       ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString() // 7 day trial
       : (validationResponse?.expiresAt || null);
 
+    const subscriptionStatus = validationResponse?.subscription_status || 'active';
+
     this.db.prepare(`
       INSERT OR REPLACE INTO license (id, license_key, tier, daily_limit, machine_id,
-        activated_at, expires_at, last_validated, validation_response)
-      VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
+        activated_at, expires_at, last_validated, validation_response, subscription_status)
+      VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       parsed.key,
       parsed.tier,
@@ -163,13 +203,8 @@ class LicenseManager {
       expiresAt,
       now,
       validationResponse ? JSON.stringify(validationResponse) : null,
+      subscriptionStatus,
     );
-
-    // Store embedded Claude API key if provided by server
-    if (validationResponse?.claudeApiKey) {
-      this.db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('claude_api_key_embedded', validationResponse.claudeApiKey);
-      console.log('[license] Claude Vision API key received from server');
-    }
 
     console.log(`[license] Activated: ${parsed.tierName} (${parsed.key.slice(0, 12)}...)`);
 
@@ -253,18 +288,24 @@ class LicenseManager {
         const data = await res.json();
         if (data.valid) {
           this.db.prepare(`
-            UPDATE license SET last_validated = ?, validation_response = ?, updated_at = ?
+            UPDATE license SET last_validated = ?, validation_response = ?, subscription_status = ?, updated_at = ?
             WHERE id = 1
-          `).run(new Date().toISOString(), JSON.stringify(data), new Date().toISOString());
-
-          // Store embedded Claude API key from server (Pro/Unlimited tiers)
+          `).run(new Date().toISOString(), JSON.stringify(data), data.subscription_status || 'active', new Date().toISOString());
+          // Cache Claude API key for Pro/Unlimited tiers
           if (data.claudeApiKey) {
-            this.db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('claude_api_key_embedded', data.claudeApiKey);
-            console.log('[license] Claude Vision API key received from server');
+            this._cachedClaudeKey = data.claudeApiKey;
+            console.log('[license] Claude Vision API key received (tier eligible)');
           }
-
           console.log('[license] Re-validated successfully');
           return true;
+        } else if (data.error === 'Subscription cancelled') {
+          // Server says subscription is cancelled — update local cache
+          this.db.prepare(`
+            UPDATE license SET subscription_status = 'cancelled', validation_response = ?, updated_at = ?
+            WHERE id = 1
+          `).run(JSON.stringify(data), new Date().toISOString());
+          console.log('[license] Subscription cancelled on server');
+          return false;
         }
       }
     } catch (err) {
@@ -272,22 +313,23 @@ class LicenseManager {
     }
     return false;
   }
+}
 
-  /** Get the effective Claude API key (user custom > embedded > null). */
+  /** Get the cached Claude API key (returned by server for Pro/Unlimited). */
   getClaudeApiKey() {
-    const custom = this.db.prepare("SELECT value FROM settings WHERE key = 'claude_api_key_custom'").get();
-    if (custom?.value) return custom.value;
-    const embedded = this.db.prepare("SELECT value FROM settings WHERE key = 'claude_api_key_embedded'").get();
-    return embedded?.value || null;
-  }
-
-  /** Set a user-provided Claude API key. Pass empty string to clear. */
-  setClaudeApiKey(key) {
-    if (key) {
-      this.db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('claude_api_key_custom', key);
-    } else {
-      this.db.prepare("DELETE FROM settings WHERE key = 'claude_api_key_custom'").run();
+    if (this._cachedClaudeKey) return this._cachedClaudeKey;
+    // Try reading from last validation response
+    const row = this.db.prepare('SELECT validation_response FROM license WHERE id = 1').get();
+    if (row && row.validation_response) {
+      try {
+        const data = JSON.parse(row.validation_response);
+        if (data.claudeApiKey) {
+          this._cachedClaudeKey = data.claudeApiKey;
+          return this._cachedClaudeKey;
+        }
+      } catch {}
     }
+    return null;
   }
 }
 

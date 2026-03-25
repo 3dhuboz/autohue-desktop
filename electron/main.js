@@ -3,23 +3,15 @@ const path = require('path');
 const { initDatabase } = require('./database');
 const { LicenseManager } = require('./license');
 const { WorkerManager } = require('./worker-manager');
+const { RulesSync } = require('./rules-sync');
 
 let mainWindow;
 let db;
 let licenseManager;
 let workerManager;
+let rulesSync;
 
 const isDev = !app.isPackaged;
-
-// Prevent EPIPE crashes from auto-updater pipe errors
-process.on('uncaughtException', (err) => {
-  if (err.code === 'EPIPE') return; // silently ignore broken pipe
-  console.error('[uncaught]', err);
-});
-process.on('unhandledRejection', (err) => {
-  if (err && err.code === 'EPIPE') return;
-  console.warn('[unhandled]', err);
-});
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -90,30 +82,48 @@ app.whenReady().then(async () => {
     }
   }
 
-  // 3. Start the AI worker process
+  // 3. Try to get Claude API key for Pro/Unlimited users (enables Vision pipeline)
+  const claudeKey = licenseManager.getClaudeApiKey();
+  if (claudeKey) {
+    console.log('[main] Claude Vision API key available — enabling fast pipeline');
+  }
+
+  // 4. Start the AI worker process
   const storagePath = path.join(app.getPath('userData'), 'worker-data');
   workerManager = new WorkerManager(storagePath);
-  workerManager.start().then(() => {
-    // Push Claude API key + tier to worker after it starts
-    syncClaudeConfigToWorker();
-  }).catch(err => {
+  if (claudeKey) workerManager.setClaudeApiKey(claudeKey);
+  workerManager.start().catch(err => {
     console.error('Worker failed to start:', err.message);
   });
 
-  // 4. Create window
+  // Re-validate license in background (may fetch Claude key if first run after upgrade)
+  licenseManager.tryRevalidate().then(() => {
+    const freshKey = licenseManager.getClaudeApiKey();
+    if (freshKey && freshKey !== claudeKey) {
+      workerManager.setClaudeApiKey(freshKey);
+    }
+  }).catch(() => {});
+
+  // 5. Create window
   createWindow();
 
-  // 5. Check for updates (production only — silent fail for private repos)
+  // 6. Check for updates (production only)
   if (!isDev) {
     try {
       const { autoUpdater } = require('electron-updater');
-      autoUpdater.logger = { info: () => {}, warn: () => {}, error: () => {} };
-      autoUpdater.checkForUpdatesAndNotify().catch(() => {});
-    } catch (_) {}
+      autoUpdater.checkForUpdatesAndNotify();
+    } catch (err) {
+      console.error('Auto-updater error:', err.message);
+    }
   }
+
+  // 7. Start rules sync — checks cloud for updated learned rules every 6 hours
+  rulesSync = new RulesSync(storagePath, workerManager.port || 3001);
+  rulesSync.start();
 });
 
 app.on('window-all-closed', () => {
+  if (rulesSync) rulesSync.stop();
   if (workerManager) workerManager.stop();
   if (process.platform !== 'darwin') app.quit();
 });
@@ -128,49 +138,11 @@ app.on('activate', () => {
 
 // ─── License ───
 ipcMain.handle('license:get', () => licenseManager.getCurrent());
-ipcMain.handle('license:activate', async (_, key) => {
-  const result = await licenseManager.activate(key);
-  // Push Claude API key + tier to worker after activation
-  if (result.success) syncClaudeConfigToWorker();
-  return result;
-});
+ipcMain.handle('license:activate', (_, key) => licenseManager.activate(key));
 ipcMain.handle('license:checkQuota', (_, count) => licenseManager.canProcess(count));
 ipcMain.handle('license:recordUsage', (_, sessionId, count, colorCounts) => {
   return licenseManager.recordUsage(sessionId, count, colorCounts);
 });
-
-// ─── Claude Vision API Key ───
-ipcMain.handle('settings:getClaudeKey', () => {
-  const custom = licenseManager.getClaudeApiKey();
-  const license = licenseManager.getCurrent();
-  const hasEmbedded = !!licenseManager.db.prepare("SELECT value FROM settings WHERE key = 'claude_api_key_embedded'").get()?.value;
-  const hasCustom = !!licenseManager.db.prepare("SELECT value FROM settings WHERE key = 'claude_api_key_custom'").get()?.value;
-  const tier = (license.tier || '').toLowerCase();
-  console.log(`[claude-key-status] tier=${tier}, active=${license.active}, hasCustom=${hasCustom}, hasEmbedded=${hasEmbedded}`);
-  return {
-    hasKey: !!custom,
-    source: hasCustom ? 'custom' : hasEmbedded ? 'platform' : 'none',
-    eligible: ['pro', 'unlimited'].includes(tier) || license.isUnlimited === true,
-    tier,
-  };
-});
-ipcMain.handle('settings:setClaudeKey', (_, key) => {
-  licenseManager.setClaudeApiKey(key);
-  syncClaudeConfigToWorker();
-  return { success: true };
-});
-
-/** Push Claude API key and tier to the running worker process. */
-function syncClaudeConfigToWorker() {
-  const claudeKey = licenseManager.getClaudeApiKey();
-  const license = licenseManager.getCurrent();
-  const workerUrl = workerManager?.getUrl?.() || 'http://localhost:3001';
-  fetch(`${workerUrl}/config`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ claudeApiKey: claudeKey || '', tier: license.tier || '' }),
-  }).catch(err => console.warn('[main] Failed to sync Claude config to worker:', err.message));
-}
 
 // ─── File Dialogs ───
 ipcMain.handle('dialog:openFolder', async () => {

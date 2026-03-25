@@ -35,6 +35,90 @@ app.use(express.json());
 // Fallback: multi-region sampling + HSV env filtering if SegFormer unavailable
 // ═══════════════════════════════════════════════════════════════════════════
 
+// ─── Claude Vision API (PRIMARY classifier for Pro/Unlimited tiers) ───
+let CLAUDE_API_KEY = process.env.CLAUDE_API_KEY || '';
+if (CLAUDE_API_KEY) {
+    console.log('[config] Claude Vision API key set — PRIMARY classifier enabled (3-5x faster, higher accuracy)');
+} else {
+    console.log('[config] No Claude Vision key — using local LAB classifier');
+}
+
+// Listen for runtime key updates from main process
+process.on('message', (msg) => {
+    if (msg && msg.type === 'set-claude-key' && msg.key) {
+        CLAUDE_API_KEY = msg.key;
+        console.log('[config] Claude Vision API key updated at runtime');
+    }
+});
+
+const VALID_COLORS = new Set(['red','blue','green','yellow','orange','purple','pink','brown','black','white','silver-grey']);
+
+async function classifyWithClaude(imageBuffer) {
+    if (!CLAUDE_API_KEY) return null;
+    try {
+        const base64 = imageBuffer.toString('base64');
+        const mediaType = 'image/jpeg';
+
+        const res = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'x-api-key': CLAUDE_API_KEY,
+                'anthropic-version': '2023-06-01',
+            },
+            body: JSON.stringify({
+                model: 'claude-haiku-4-20250414',
+                max_tokens: 30,
+                messages: [{
+                    role: 'user',
+                    content: [
+                        {
+                            type: 'image',
+                            source: { type: 'base64', media_type: mediaType, data: base64 },
+                        },
+                        {
+                            type: 'text',
+                            text: 'What is the main color of the car/vehicle in this motorsport photo? Reply with ONLY one word from this list: red, blue, green, yellow, orange, purple, pink, brown, black, white, silver-grey. If multiple vehicles, classify the most prominent one. Reply with just the color word, nothing else.',
+                        },
+                    ],
+                }],
+            }),
+            signal: AbortSignal.timeout(15000),
+        });
+
+        if (!res.ok) {
+            const errText = await res.text();
+            console.error(`[claude] API error ${res.status}: ${errText.slice(0, 200)}`);
+            return null;
+        }
+
+        const data = await res.json();
+        const rawAnswer = (data.content?.[0]?.text || '').trim().toLowerCase().replace(/[^a-z-]/g, '');
+
+        // Map common variations
+        const colorMap = {
+            'silver': 'silver-grey', 'grey': 'silver-grey', 'gray': 'silver-grey',
+            'silvergrey': 'silver-grey', 'silvergray': 'silver-grey',
+            'maroon': 'red', 'burgundy': 'red', 'crimson': 'red',
+            'navy': 'blue', 'teal': 'blue', 'cyan': 'blue', 'turquoise': 'blue',
+            'gold': 'yellow', 'cream': 'white', 'ivory': 'white', 'beige': 'white',
+            'olive': 'green', 'lime': 'green', 'magenta': 'pink', 'tan': 'brown',
+        };
+        const mapped = colorMap[rawAnswer] || rawAnswer;
+
+        if (VALID_COLORS.has(mapped)) {
+            console.log(`  [claude] Vision result: ${mapped} (raw: "${rawAnswer}")`);
+            return { category: mapped, confidence: 0.95, method: 'claude-vision' };
+        }
+
+        console.warn(`  [claude] Unrecognized color: "${rawAnswer}" → falling back`);
+        return null;
+    } catch (err) {
+        console.error(`[claude] Vision classify failed: ${err.message}`);
+        return null;
+    }
+}
+
 // ─── Nyckel API configuration (from environment variables) ───
 const NYCKEL_CLIENT_ID = process.env.NYCKEL_CLIENT_ID || '';
 const NYCKEL_CLIENT_SECRET = process.env.NYCKEL_CLIENT_SECRET || '';
@@ -43,86 +127,6 @@ if (!NYCKEL_CLIENT_ID || !NYCKEL_CLIENT_SECRET) {
     console.warn('[config] NYCKEL_CLIENT_ID / NYCKEL_CLIENT_SECRET not set — Nyckel API disabled, using local LAB-only classification');
 }
 let nyckelToken = null;
-
-// ─── Claude Vision API configuration ───
-let CLAUDE_API_KEY = process.env.CLAUDE_API_KEY || '';
-let CLAUDE_TIER = process.env.CLAUDE_TIER || '';  // 'pro', 'unlimited', etc.
-const CLAUDE_MODEL = 'claude-haiku-4-5-20251001';
-const CLAUDE_VALID_COLORS = ['red', 'blue', 'green', 'yellow', 'gold', 'orange', 'purple', 'pink', 'brown', 'black', 'white', 'silver-grey', 'unknown'];
-
-if (CLAUDE_API_KEY) {
-    console.log(`[config] Claude Vision API enabled (tier: ${CLAUDE_TIER || 'unknown'})`);
-} else {
-    console.log('[config] Claude Vision API not configured — using local pipeline');
-}
-
-function isClaudeVisionEnabled() {
-    return !!CLAUDE_API_KEY && ['pro', 'unlimited'].includes(CLAUDE_TIER);
-}
-
-async function classifyWithClaude(imagePath) {
-    if (!CLAUDE_API_KEY) return null;
-    try {
-        const imageData = fs.readFileSync(imagePath);
-        const base64 = imageData.toString('base64');
-        const ext = path.extname(imagePath).toLowerCase();
-        const mediaType = ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg';
-
-        const res = await fetch('https://api.anthropic.com/v1/messages', {
-            method: 'POST',
-            headers: {
-                'x-api-key': CLAUDE_API_KEY,
-                'anthropic-version': '2023-06-01',
-                'content-type': 'application/json',
-            },
-            body: JSON.stringify({
-                model: CLAUDE_MODEL,
-                max_tokens: 30,
-                messages: [{
-                    role: 'user',
-                    content: [
-                        { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
-                        { type: 'text', text: 'What is the body color of the MAIN vehicle (largest/most prominent car or truck) in this photo? Ignore background vehicles, signage, and surroundings. Reply with ONLY one word from: red, blue, green, yellow, gold, orange, purple, pink, brown, black, white, silver-grey. If truly no vehicle visible, reply: unknown' }
-                    ]
-                }]
-            }),
-            signal: AbortSignal.timeout(15000),
-        });
-
-        if (!res.ok) {
-            const err = await res.text().catch(() => '');
-            console.error(`[claude] API error ${res.status}: ${err.slice(0, 200)}`);
-            return null;
-        }
-
-        const data = await res.json();
-        const text = (data.content?.[0]?.text || '').trim().toLowerCase().replace(/[^a-z-]/g, '');
-
-        if (CLAUDE_VALID_COLORS.includes(text)) {
-            console.log(`  [claude] → ${text}`);
-            const hex = {
-                red: '#ef4444', blue: '#3b82f6', green: '#22c55e', yellow: '#eab308',
-                gold: '#d97706', orange: '#f97316', purple: '#a855f7', pink: '#ec4899',
-                brown: '#a16207', black: '#334155', white: '#e2e8f0', 'silver-grey': '#94a3b8',
-                unknown: '#666666'
-            }[text] || '#666666';
-            return {
-                rgb: [0, 0, 0],
-                category: text,
-                hex,
-                confidence: text === 'unknown' ? 'low' : 'high',
-                method: 'claude-vision',
-                aiDetected: true,
-            };
-        }
-
-        console.warn(`[claude] Unexpected response: "${text}"`);
-        return null;
-    } catch (err) {
-        console.error(`[claude] Classification failed: ${err.message}`);
-        return null;
-    }
-}
 let nyckelTokenExpiry = 0;
 
 async function getNyckelToken() {
@@ -628,10 +632,12 @@ const CAR_COLORS_RGB = {
     'brown': [
         [120,70,30],[100,55,20],[140,80,40],[85,45,15],[110,65,25],
         [130,75,35],[95,50,18],[150,90,50],[80,40,10],[115,60,28],
-        // Tan/bronze
-        [160,120,70],[140,100,50],[120,85,45],[180,140,80],[150,110,60],
+        // Tan/bronze (must be clearly brown, not warm-white)
+        [160,110,55],[140,95,45],[120,80,35],[150,105,50],[135,90,40],
         // Dark rust brown
-        [100,50,30],[90,45,25],
+        [100,50,30],[90,45,25],[110,55,25],[95,48,20],
+        // Chocolate brown
+        [80,50,25],[70,40,20],[90,55,30],[75,45,22],[85,48,28],
     ],
     'black': [
         [5,5,5],[10,10,10],[15,15,15],[20,20,20],[25,25,25],
@@ -646,6 +652,16 @@ const CAR_COLORS_RGB = {
         [225,225,225],[220,220,220],[215,215,218],[210,210,212],[218,218,220],
         [205,205,208],[212,212,215],[222,222,225],[208,208,210],[215,214,216],
         [230,232,238],[228,230,235],[232,234,240],[226,228,232],[235,237,242],
+        // Warm-tinted whites (dusty track, warm sunlight, motorsport conditions)
+        [240,235,220],[235,230,215],[245,240,225],[230,225,210],[238,233,218],
+        [242,237,222],[232,227,212],[248,243,228],[228,223,208],[236,231,216],
+        [220,215,200],[215,210,195],[225,220,205],[210,205,190],[218,213,198],
+        [222,217,202],[212,207,192],[228,223,208],[208,203,188],[216,211,196],
+        // Cream whites (very common on white cars in warm light)
+        [240,235,225],[235,228,218],[245,238,228],[230,222,212],[238,230,220],
+        [225,218,208],[220,213,203],[232,225,215],[215,208,198],[228,221,211],
+        // Cool whites (overcast, shade)
+        [230,235,240],[225,230,238],[235,238,242],[220,225,232],[228,232,238],
     ],
     'silver-grey': [
         [150,150,155],[160,160,165],[170,170,172],[140,140,145],[155,155,158],
@@ -657,6 +673,12 @@ const CAR_COLORS_RGB = {
         [170,175,185],[160,165,175],[180,185,195],
         // Gun metal grey
         [80,80,85],[90,90,95],
+        // Warm silver (dusty/warm conditions, very common at motorsport events)
+        [180,175,165],[175,170,160],[185,180,170],[170,165,155],[190,185,175],
+        [195,190,180],[200,195,185],[165,160,150],[188,183,173],[172,167,157],
+        [160,155,145],[155,150,140],[165,160,148],[150,145,135],[168,163,152],
+        // Warm medium grey
+        [140,135,125],[135,130,120],[145,140,130],[130,125,115],[148,143,133],
     ],
 };
 
@@ -974,6 +996,37 @@ function classifyPixelsLAB(pixels) {
 //   Stage 4: Nyckel on masked crop + LAB on pure vehicle pixels → smart merge
 async function analyzeImageColor(imagePath) {
     try {
+        // ═══ FAST PATH: Claude Vision (Pro/Unlimited tiers) ═══
+        // When available, Claude Vision is the PRIMARY classifier — much more accurate
+        // than local LAB for tricky colors (white vs brown, silver vs grey etc.)
+        if (CLAUDE_API_KEY) {
+            try {
+                // Read and resize for Claude (keep it under 1MB for speed)
+                const img = await Jimp.read(imagePath);
+                const resized = img.clone().resize(Math.min(800, img.getWidth()), Jimp.AUTO).quality(75);
+                const jpegBuffer = await resized.getBufferAsync(Jimp.MIME_JPEG);
+
+                const claudeResult = await classifyWithClaude(jpegBuffer);
+                if (claudeResult) {
+                    // Claude Vision succeeded — return immediately (skip heavy pipeline)
+                    return {
+                        rgb: [128, 128, 128], // placeholder — Claude doesn't return RGB
+                        category: claudeResult.category,
+                        hex: '#808080',
+                        confidence: 'high',
+                        aiDetected: true,
+                        segmented: false,
+                        method: 'claude-vision',
+                    };
+                }
+                // Claude Vision failed — fall through to local pipeline
+                console.log('  [claude] Vision failed, falling back to local pipeline');
+            } catch (err) {
+                console.warn('  [claude] Vision error, falling back:', err.message);
+            }
+        }
+
+        // ═══ LOCAL PIPELINE: SSD-MobileNet + SegFormer + LAB (fallback) ═══
         const image = await Jimp.read(imagePath);
         const w = image.getWidth(), h = image.getHeight();
 
@@ -1423,18 +1476,7 @@ async function processSession(sessionId) {
         await waitIfPaused();
         const file = path.basename(filePath);
 
-        // Use Claude Vision for Pro/Unlimited, fall back to local pipeline
-        let colorInfo;
-        if (isClaudeVisionEnabled()) {
-            colorInfo = await classifyWithClaude(filePath);
-            // Fall back to local pipeline if Claude fails OR returns unknown
-            if (!colorInfo || colorInfo.category === 'unknown') {
-                console.log(`  [claude] ${!colorInfo ? 'API failed' : 'returned unknown'} — falling back to local pipeline for ${file}`);
-                colorInfo = await analyzeImageColor(filePath);
-            }
-        } else {
-            colorInfo = await analyzeImageColor(filePath);
-        }
+        const colorInfo = await analyzeImageColor(filePath);
         const thumbUrl = await generateThumb(filePath, sessionId, `${index}_${file}`);
 
         const needsReview = colorInfo.category === 'unknown' || colorInfo.confidence === 'none' || colorInfo.confidence === 'very-low';
@@ -1465,7 +1507,6 @@ async function processSession(sessionId) {
             rgb: colorInfo.rgb,
             thumb: thumbUrl,
             confidence: colorInfo.confidence || 'unknown',
-            method: colorInfo.method || 'local',
             regions: colorInfo.regionsAgreeing ? `${colorInfo.regionsAgreeing}/${colorInfo.totalRegions}` : null,
             needsReview,
             originalColor: needsReview ? colorInfo.category : null,
@@ -1566,14 +1607,11 @@ app.post('/sort-local', async (req, res) => {
         return res.status(400).json({ error: 'inputPath is required' });
     }
 
-    // Validate inputPath exists (directory OR archive file)
-    let isArchive = false;
+    // Validate inputPath exists and is a directory
     try {
         const stat = fs.statSync(inputPath);
-        if (stat.isFile() && /\.(zip|rar)$/i.test(inputPath)) {
-            isArchive = true;
-        } else if (!stat.isDirectory()) {
-            return res.status(400).json({ error: 'inputPath must be a directory or ZIP/RAR file' });
+        if (!stat.isDirectory()) {
+            return res.status(400).json({ error: 'inputPath is not a directory' });
         }
     } catch (err) {
         return res.status(400).json({ error: `inputPath not accessible: ${err.message}` });
@@ -1582,34 +1620,6 @@ app.post('/sort-local', async (req, res) => {
     const sessionId = crypto.randomUUID();
     const sessionUploadDir = path.join(UPLOAD_DIR, sessionId);
     fs.mkdirSync(sessionUploadDir, { recursive: true });
-
-    // If it's an archive, copy it into the session upload dir and let processSession extract it
-    if (isArchive) {
-        const destName = path.basename(inputPath);
-        fs.copyFileSync(inputPath, path.join(sessionUploadDir, destName));
-        console.log(`[${sessionId}] sort-local: archive ${destName} (${(fs.statSync(inputPath).size / (1024*1024)).toFixed(0)} MB) — copied to session dir`);
-
-        sessions[sessionId] = {
-            status: 'queued',
-            total: 0,
-            processed: 0,
-            currentFile: 'Extracting archive...',
-            results: [],
-            colorCounts: {}
-        };
-
-        processSession(sessionId).catch(err => {
-            console.error(`[${sessionId}] Processing error:`, err);
-            sessions[sessionId].status = 'error';
-            sessions[sessionId].error = err.message;
-        });
-
-        return res.json({
-            session_id: sessionId,
-            message: 'Processing started (archive)',
-            total_images: 0
-        });
-    }
 
     // Recursively collect all image and archive files from inputPath
     function collectFilesRecursive(dir) {
@@ -1718,20 +1728,6 @@ app.post('/cancel/:sessionId', (req, res) => {
         return res.json({ success: true, status: 'cancelled' });
     }
     res.json({ success: false, status: session.status, message: 'Can only cancel an active session' });
-});
-
-// ─── Config endpoint (update Claude API key at runtime) ───
-app.post('/config', (req, res) => {
-    const { claudeApiKey, tier } = req.body;
-    if (claudeApiKey !== undefined) {
-        CLAUDE_API_KEY = claudeApiKey || '';
-        console.log(`[config] Claude API key ${CLAUDE_API_KEY ? 'set' : 'cleared'}`);
-    }
-    if (tier !== undefined) {
-        CLAUDE_TIER = tier || '';
-        console.log(`[config] Tier set to: ${CLAUDE_TIER}`);
-    }
-    res.json({ success: true, claudeVisionEnabled: isClaudeVisionEnabled() });
 });
 
 // ─── Status endpoint (returns live progress + recent results) ───
@@ -1906,15 +1902,16 @@ app.get('/health', (req, res) => {
         ssdModelExists: fs.existsSync(SSD_MODEL_PATH),
         segModelPath: SEGFORMER_MODEL_PATH,
         segModelExists: fs.existsSync(SEGFORMER_MODEL_PATH),
-        pipeline: segformerSession
-            ? 'SSD bbox → SegFormer pixel mask → pure vehicle pixels → Nyckel+LAB → merge'
-            : 'SSD bbox → multi-region crop → env filter → Nyckel+LAB → merge',
+        claudeVision: CLAUDE_API_KEY ? 'active' : 'not configured',
+        pipeline: CLAUDE_API_KEY
+            ? 'Claude Vision (PRIMARY) → local LAB (fallback)'
+            : segformerSession
+                ? 'SSD bbox → SegFormer pixel mask → pure vehicle pixels → Nyckel+LAB → merge'
+                : 'SSD bbox → multi-region crop → env filter → Nyckel+LAB → merge',
         storageRoot: STORAGE_ROOT,
         storagePersistent: !!process.env.STORAGE_ROOT,
         uptime: Math.round(process.uptime()) + 's',
         nyckelConfigured: !!(NYCKEL_CLIENT_ID && NYCKEL_CLIENT_SECRET),
-        claudeVisionEnabled: isClaudeVisionEnabled(),
-        claudeTier: CLAUDE_TIER,
         activeSessions: Object.keys(sessions).length,
     });
 });

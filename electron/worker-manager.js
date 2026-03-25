@@ -8,9 +8,20 @@ class WorkerManager {
     this.port = 3001;
     this.storagePath = storagePath;
     this.restarting = false;
+    this.claudeApiKey = null;
 
     // Ensure storage directories exist
     fs.mkdirSync(storagePath, { recursive: true });
+  }
+
+  /** Set the Claude API key for Vision classification. */
+  setClaudeApiKey(key) {
+    this.claudeApiKey = key;
+    // If worker is already running, send the key via message
+    if (this.process && key) {
+      this.process.send({ type: 'set-claude-key', key });
+      console.log('[worker] Sent Claude API key to running worker');
+    }
   }
 
   /** Resolve the path to server.js (works in dev and packaged builds). */
@@ -44,21 +55,12 @@ class WorkerManager {
     console.log(`[worker] Server: ${serverPath}`);
     console.log(`[worker] Storage: ${this.storagePath}`);
 
-    // In packaged builds, worker lives in resources/worker/ (outside app.asar)
-    // Native modules are in resources/worker/node_modules/ (copied by build script)
-    const { app } = require('electron');
-    const extraEnv = {};
-    if (app.isPackaged) {
-      const workerModules = path.join(process.resourcesPath, 'worker', 'node_modules');
-      extraEnv.NODE_PATH = workerModules;
-    }
-
     this.process = fork(serverPath, [], {
       env: {
         ...process.env,
-        ...extraEnv,
         PORT: String(this.port),
         STORAGE_ROOT: this.storagePath,
+        ...(this.claudeApiKey ? { CLAUDE_API_KEY: this.claudeApiKey } : {}),
       },
       silent: true, // capture stdout/stderr
     });
@@ -110,11 +112,6 @@ class WorkerManager {
       this.process.kill('SIGTERM');
       this.process = null;
     }
-  }
-
-  /** Get the worker base URL. */
-  getUrl() {
-    return `http://localhost:${this.port}`;
   }
 
   /** Check worker health. */
