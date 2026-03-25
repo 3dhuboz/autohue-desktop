@@ -21,16 +21,10 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build & package
+      - name: Build, package & publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm run build
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-installer
-          path: dist/AutoHue-Setup-*.exe
 
   build-mac:
     runs-on: macos-latest
@@ -44,45 +38,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build & package
+      - name: Build, package & publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm run build
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: mac-installer
-          path: |
-            dist/AutoHue-*.dmg
-            dist/AutoHue-*.zip
-
-  release:
-    needs: [build-windows, build-mac]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download Windows artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: windows-installer
-          path: dist/
-
-      - name: Download Mac artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: mac-installer
-          path: dist/
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            dist/AutoHue-Setup-*.exe
-            dist/AutoHue-*.dmg
-            dist/AutoHue-*.zip
-          generate_release_notes: true
-          draft: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
