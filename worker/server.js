@@ -1607,12 +1607,10 @@ app.post('/sort-local', async (req, res) => {
         return res.status(400).json({ error: 'inputPath is required' });
     }
 
-    // Validate inputPath exists and is a directory
+    // Validate inputPath exists
+    let stat;
     try {
-        const stat = fs.statSync(inputPath);
-        if (!stat.isDirectory()) {
-            return res.status(400).json({ error: 'inputPath is not a directory' });
-        }
+        stat = fs.statSync(inputPath);
     } catch (err) {
         return res.status(400).json({ error: `inputPath not accessible: ${err.message}` });
     }
@@ -1620,6 +1618,35 @@ app.post('/sort-local', async (req, res) => {
     const sessionId = crypto.randomUUID();
     const sessionUploadDir = path.join(UPLOAD_DIR, sessionId);
     fs.mkdirSync(sessionUploadDir, { recursive: true });
+
+    // If inputPath is an archive file (ZIP/RAR), copy it directly to session dir for extraction
+    const isArchiveFile = stat.isFile() && /\.(zip|rar)$/i.test(inputPath);
+    if (isArchiveFile) {
+        console.log(`[${sessionId}] sort-local: archive file detected → ${path.basename(inputPath)} (${(stat.size / 1024 / 1024).toFixed(0)}MB)`);
+        const destName = path.basename(inputPath);
+        // Symlink instead of copy for large archives (instant, no disk waste)
+        try {
+            fs.symlinkSync(inputPath, path.join(sessionUploadDir, destName));
+        } catch {
+            // Symlink may fail on Windows without elevated perms — fall back to copy
+            fs.copyFileSync(inputPath, path.join(sessionUploadDir, destName));
+        }
+        // processSession will extract the archive and find images inside
+        const session = {
+            id: sessionId, status: 'queued', total_images: 0,
+            processed: 0, results: [], startedAt: new Date().toISOString(),
+        };
+        sessions[sessionId] = session;
+        processSession(sessionId, sessionUploadDir).catch(err =>
+            console.error(`[${sessionId}] processSession error:`, err.message)
+        );
+        return res.json({ session_id: sessionId, total_images: 0, status: 'extracting' });
+    }
+
+    // inputPath is a directory — collect files recursively
+    if (!stat.isDirectory()) {
+        return res.status(400).json({ error: 'inputPath must be a directory or archive file (ZIP/RAR)' });
+    }
 
     // Recursively collect all image and archive files from inputPath
     function collectFilesRecursive(dir) {
