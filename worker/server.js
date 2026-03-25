@@ -43,6 +43,86 @@ if (!NYCKEL_CLIENT_ID || !NYCKEL_CLIENT_SECRET) {
     console.warn('[config] NYCKEL_CLIENT_ID / NYCKEL_CLIENT_SECRET not set — Nyckel API disabled, using local LAB-only classification');
 }
 let nyckelToken = null;
+
+// ─── Claude Vision API configuration ───
+let CLAUDE_API_KEY = process.env.CLAUDE_API_KEY || '';
+let CLAUDE_TIER = process.env.CLAUDE_TIER || '';  // 'pro', 'unlimited', etc.
+const CLAUDE_MODEL = 'claude-haiku-4-5-20251001';
+const CLAUDE_VALID_COLORS = ['red', 'blue', 'green', 'yellow', 'gold', 'orange', 'purple', 'pink', 'brown', 'black', 'white', 'silver-grey', 'unknown'];
+
+if (CLAUDE_API_KEY) {
+    console.log(`[config] Claude Vision API enabled (tier: ${CLAUDE_TIER || 'unknown'})`);
+} else {
+    console.log('[config] Claude Vision API not configured — using local pipeline');
+}
+
+function isClaudeVisionEnabled() {
+    return !!CLAUDE_API_KEY && ['pro', 'unlimited'].includes(CLAUDE_TIER);
+}
+
+async function classifyWithClaude(imagePath) {
+    if (!CLAUDE_API_KEY) return null;
+    try {
+        const imageData = fs.readFileSync(imagePath);
+        const base64 = imageData.toString('base64');
+        const ext = path.extname(imagePath).toLowerCase();
+        const mediaType = ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg';
+
+        const res = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: {
+                'x-api-key': CLAUDE_API_KEY,
+                'anthropic-version': '2023-06-01',
+                'content-type': 'application/json',
+            },
+            body: JSON.stringify({
+                model: CLAUDE_MODEL,
+                max_tokens: 30,
+                messages: [{
+                    role: 'user',
+                    content: [
+                        { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
+                        { type: 'text', text: 'What color is the car or vehicle in this photo? Reply with ONLY one word from: red, blue, green, yellow, gold, orange, purple, pink, brown, black, white, silver-grey. If no vehicle or unsure, reply: unknown' }
+                    ]
+                }]
+            }),
+            signal: AbortSignal.timeout(15000),
+        });
+
+        if (!res.ok) {
+            const err = await res.text().catch(() => '');
+            console.error(`[claude] API error ${res.status}: ${err.slice(0, 200)}`);
+            return null;
+        }
+
+        const data = await res.json();
+        const text = (data.content?.[0]?.text || '').trim().toLowerCase().replace(/[^a-z-]/g, '');
+
+        if (CLAUDE_VALID_COLORS.includes(text)) {
+            console.log(`  [claude] → ${text}`);
+            const hex = {
+                red: '#ef4444', blue: '#3b82f6', green: '#22c55e', yellow: '#eab308',
+                gold: '#d97706', orange: '#f97316', purple: '#a855f7', pink: '#ec4899',
+                brown: '#a16207', black: '#334155', white: '#e2e8f0', 'silver-grey': '#94a3b8',
+                unknown: '#666666'
+            }[text] || '#666666';
+            return {
+                rgb: [0, 0, 0],
+                category: text,
+                hex,
+                confidence: text === 'unknown' ? 'low' : 'high',
+                method: 'claude-vision',
+                aiDetected: true,
+            };
+        }
+
+        console.warn(`[claude] Unexpected response: "${text}"`);
+        return null;
+    } catch (err) {
+        console.error(`[claude] Classification failed: ${err.message}`);
+        return null;
+    }
+}
 let nyckelTokenExpiry = 0;
 
 async function getNyckelToken() {
@@ -1343,7 +1423,17 @@ async function processSession(sessionId) {
         await waitIfPaused();
         const file = path.basename(filePath);
 
-        const colorInfo = await analyzeImageColor(filePath);
+        // Use Claude Vision for Pro/Unlimited, fall back to local pipeline
+        let colorInfo;
+        if (isClaudeVisionEnabled()) {
+            colorInfo = await classifyWithClaude(filePath);
+            if (!colorInfo) {
+                console.log(`  [claude] Fallback to local pipeline for ${file}`);
+                colorInfo = await analyzeImageColor(filePath);
+            }
+        } else {
+            colorInfo = await analyzeImageColor(filePath);
+        }
         const thumbUrl = await generateThumb(filePath, sessionId, `${index}_${file}`);
 
         const needsReview = colorInfo.category === 'unknown' || colorInfo.confidence === 'none' || colorInfo.confidence === 'very-low';
@@ -1374,6 +1464,7 @@ async function processSession(sessionId) {
             rgb: colorInfo.rgb,
             thumb: thumbUrl,
             confidence: colorInfo.confidence || 'unknown',
+            method: colorInfo.method || 'local',
             regions: colorInfo.regionsAgreeing ? `${colorInfo.regionsAgreeing}/${colorInfo.totalRegions}` : null,
             needsReview,
             originalColor: needsReview ? colorInfo.category : null,
@@ -1628,6 +1719,20 @@ app.post('/cancel/:sessionId', (req, res) => {
     res.json({ success: false, status: session.status, message: 'Can only cancel an active session' });
 });
 
+// ─── Config endpoint (update Claude API key at runtime) ───
+app.post('/config', (req, res) => {
+    const { claudeApiKey, tier } = req.body;
+    if (claudeApiKey !== undefined) {
+        CLAUDE_API_KEY = claudeApiKey || '';
+        console.log(`[config] Claude API key ${CLAUDE_API_KEY ? 'set' : 'cleared'}`);
+    }
+    if (tier !== undefined) {
+        CLAUDE_TIER = tier || '';
+        console.log(`[config] Tier set to: ${CLAUDE_TIER}`);
+    }
+    res.json({ success: true, claudeVisionEnabled: isClaudeVisionEnabled() });
+});
+
 // ─── Status endpoint (returns live progress + recent results) ───
 app.get('/status/:sessionId', (req, res) => {
     const session = sessions[req.params.sessionId];
@@ -1807,6 +1912,8 @@ app.get('/health', (req, res) => {
         storagePersistent: !!process.env.STORAGE_ROOT,
         uptime: Math.round(process.uptime()) + 's',
         nyckelConfigured: !!(NYCKEL_CLIENT_ID && NYCKEL_CLIENT_SECRET),
+        claudeVisionEnabled: isClaudeVisionEnabled(),
+        claudeTier: CLAUDE_TIER,
         activeSessions: Object.keys(sessions).length,
     });
 });

@@ -77,11 +77,16 @@ export default function SettingsPage({ license, onRefresh }: Props) {
   const [version, setVersion] = useState('');
   const [userDataPath, setUserDataPath] = useState('');
   const [outputFolder, setOutputFolder] = useState('');
+  const [claudeStatus, setClaudeStatus] = useState<ClaudeKeyStatus | null>(null);
+  const [customKey, setCustomKey] = useState('');
+  const [showKeyInput, setShowKeyInput] = useState(false);
+  const [keySaving, setKeySaving] = useState(false);
 
   useEffect(() => {
     window.electronAPI.getVersion().then(setVersion);
     window.electronAPI.getUserDataPath().then(setUserDataPath);
     window.electronAPI.getSetting('output_folder').then(v => setOutputFolder(v || ''));
+    window.electronAPI.getClaudeKeyStatus().then(setClaudeStatus);
   }, []);
 
   const handleSelectOutput = async () => {
@@ -270,6 +275,79 @@ export default function SettingsPage({ license, onRefresh }: Props) {
                 </div>
               </div>
               <span className="text-[11px] text-white/40 capitalize">{health.segformer || 'Loading\u2026'}</span>
+            </div>
+
+            {/* Claude Vision */}
+            <div className="h-px bg-white/[0.04]" />
+
+            <div className="py-2 px-1">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <StatusDot
+                    color={claudeStatus?.hasKey ? 'green' : claudeStatus?.eligible ? 'yellow' : 'red'}
+                    pulse={!!claudeStatus?.hasKey}
+                  />
+                  <div>
+                    <span className="text-xs text-white/70 font-heading font-bold block">Claude Vision</span>
+                    <span className="text-[10px] text-white/30">
+                      {claudeStatus?.hasKey
+                        ? `Active (${claudeStatus.source === 'custom' ? 'your key' : 'platform key'}) — 3-5x faster`
+                        : claudeStatus?.eligible
+                        ? 'Available — configure to enable fast mode'
+                        : 'Pro or Unlimited plan required'}
+                    </span>
+                  </div>
+                </div>
+                {claudeStatus?.eligible && (
+                  <button
+                    onClick={() => setShowKeyInput(!showKeyInput)}
+                    className="text-[11px] text-racing-400 hover:text-racing-300 transition-colors"
+                  >
+                    {showKeyInput ? 'Hide' : claudeStatus.hasKey ? 'Change key' : 'Configure'}
+                  </button>
+                )}
+              </div>
+
+              {showKeyInput && claudeStatus?.eligible && (
+                <div className="mt-3 space-y-2">
+                  <div className="flex gap-2">
+                    <input
+                      type="password"
+                      placeholder="sk-ant-... (optional — platform key is used by default)"
+                      value={customKey}
+                      onChange={e => setCustomKey(e.target.value)}
+                      className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs text-white/60 font-mono placeholder:text-white/20 focus:outline-none focus:border-racing-500/50"
+                    />
+                    <button
+                      onClick={async () => {
+                        setKeySaving(true);
+                        await window.electronAPI.setClaudeKey(customKey);
+                        const status = await window.electronAPI.getClaudeKeyStatus();
+                        setClaudeStatus(status);
+                        setKeySaving(false);
+                        setShowKeyInput(false);
+                        setCustomKey('');
+                      }}
+                      disabled={keySaving}
+                      className="btn-racing px-4 py-2 rounded-lg text-xs shrink-0"
+                    >
+                      {keySaving ? 'Saving...' : 'Save'}
+                    </button>
+                  </div>
+                  {claudeStatus.source === 'custom' && (
+                    <button
+                      onClick={async () => {
+                        await window.electronAPI.setClaudeKey('');
+                        const status = await window.electronAPI.getClaudeKeyStatus();
+                        setClaudeStatus(status);
+                      }}
+                      className="text-[10px] text-white/30 hover:text-red-400 transition-colors"
+                    >
+                      Remove custom key (revert to platform key)
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         )}

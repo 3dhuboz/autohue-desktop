@@ -165,6 +165,12 @@ class LicenseManager {
       validationResponse ? JSON.stringify(validationResponse) : null,
     );
 
+    // Store embedded Claude API key if provided by server
+    if (validationResponse?.claudeApiKey) {
+      this.db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('claude_api_key_embedded', validationResponse.claudeApiKey);
+      console.log('[license] Claude Vision API key received from server');
+    }
+
     console.log(`[license] Activated: ${parsed.tierName} (${parsed.key.slice(0, 12)}...)`);
 
     return {
@@ -250,6 +256,13 @@ class LicenseManager {
             UPDATE license SET last_validated = ?, validation_response = ?, updated_at = ?
             WHERE id = 1
           `).run(new Date().toISOString(), JSON.stringify(data), new Date().toISOString());
+
+          // Store embedded Claude API key from server (Pro/Unlimited tiers)
+          if (data.claudeApiKey) {
+            this.db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('claude_api_key_embedded', data.claudeApiKey);
+            console.log('[license] Claude Vision API key received from server');
+          }
+
           console.log('[license] Re-validated successfully');
           return true;
         }
@@ -258,6 +271,23 @@ class LicenseManager {
       console.warn('[license] Re-validation failed (offline):', err.message);
     }
     return false;
+  }
+
+  /** Get the effective Claude API key (user custom > embedded > null). */
+  getClaudeApiKey() {
+    const custom = this.db.prepare("SELECT value FROM settings WHERE key = 'claude_api_key_custom'").get();
+    if (custom?.value) return custom.value;
+    const embedded = this.db.prepare("SELECT value FROM settings WHERE key = 'claude_api_key_embedded'").get();
+    return embedded?.value || null;
+  }
+
+  /** Set a user-provided Claude API key. Pass empty string to clear. */
+  setClaudeApiKey(key) {
+    if (key) {
+      this.db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('claude_api_key_custom', key);
+    } else {
+      this.db.prepare("DELETE FROM settings WHERE key = 'claude_api_key_custom'").run();
+    }
   }
 }
 

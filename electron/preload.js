@@ -18,6 +18,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getSetting: (key) => ipcRenderer.invoke('settings:get', key),
   setSetting: (key, value) => ipcRenderer.invoke('settings:set', key, value),
 
+  // Claude Vision API
+  getClaudeKeyStatus: () => ipcRenderer.invoke('settings:getClaudeKey'),
+  setClaudeKey: (key) => ipcRenderer.invoke('settings:setClaudeKey', key),
+
   // History
   getHistory: () => ipcRenderer.invoke('history:list'),
   deleteHistory: (id) => ipcRenderer.invoke('history:delete', id),

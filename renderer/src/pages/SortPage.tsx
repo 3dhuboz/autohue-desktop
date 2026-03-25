@@ -591,6 +591,18 @@ export default function SortPage() {
               <p className="text-white/30 text-sm mt-1">
                 {paused ? 'Processing is paused — you can navigate away safely' : 'AI is detecting cars and classifying colors'}
               </p>
+              {stats.results.length > 0 && stats.results[stats.results.length - 1] && (
+                <span className={`inline-flex items-center gap-1.5 mt-2 px-2.5 py-1 rounded-full text-[10px] font-bold ${
+                  (stats.results[stats.results.length - 1] as any).method === 'claude-vision'
+                    ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20'
+                    : 'bg-white/5 text-white/30 border border-white/10'
+                }`}>
+                  <span className={`w-1.5 h-1.5 rounded-full ${
+                    (stats.results[stats.results.length - 1] as any).method === 'claude-vision' ? 'bg-purple-400' : 'bg-white/30'
+                  }`} />
+                  {(stats.results[stats.results.length - 1] as any).method === 'claude-vision' ? 'Claude Vision' : 'Local AI'}
+                </span>
+              )}
               <div className="flex items-center justify-center gap-3 mt-4">
                 {paused ? (
                   <button

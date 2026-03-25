@@ -83,7 +83,10 @@ app.whenReady().then(async () => {
   // 3. Start the AI worker process
   const storagePath = path.join(app.getPath('userData'), 'worker-data');
   workerManager = new WorkerManager(storagePath);
-  workerManager.start().catch(err => {
+  workerManager.start().then(() => {
+    // Push Claude API key + tier to worker after it starts
+    syncClaudeConfigToWorker();
+  }).catch(err => {
     console.error('Worker failed to start:', err.message);
   });
 
@@ -116,11 +119,47 @@ app.on('activate', () => {
 
 // ─── License ───
 ipcMain.handle('license:get', () => licenseManager.getCurrent());
-ipcMain.handle('license:activate', (_, key) => licenseManager.activate(key));
+ipcMain.handle('license:activate', async (_, key) => {
+  const result = await licenseManager.activate(key);
+  // Push Claude API key + tier to worker after activation
+  if (result.success) syncClaudeConfigToWorker();
+  return result;
+});
 ipcMain.handle('license:checkQuota', (_, count) => licenseManager.canProcess(count));
 ipcMain.handle('license:recordUsage', (_, sessionId, count, colorCounts) => {
   return licenseManager.recordUsage(sessionId, count, colorCounts);
 });
+
+// ─── Claude Vision API Key ───
+ipcMain.handle('settings:getClaudeKey', () => {
+  const custom = licenseManager.getClaudeApiKey();
+  const license = licenseManager.getCurrent();
+  const hasEmbedded = !!licenseManager.db.prepare("SELECT value FROM settings WHERE key = 'claude_api_key_embedded'").get()?.value;
+  const hasCustom = !!licenseManager.db.prepare("SELECT value FROM settings WHERE key = 'claude_api_key_custom'").get()?.value;
+  return {
+    hasKey: !!custom,
+    source: hasCustom ? 'custom' : hasEmbedded ? 'platform' : 'none',
+    eligible: ['pro', 'unlimited'].includes(license.tier),
+    tier: license.tier,
+  };
+});
+ipcMain.handle('settings:setClaudeKey', (_, key) => {
+  licenseManager.setClaudeApiKey(key);
+  syncClaudeConfigToWorker();
+  return { success: true };
+});
+
+/** Push Claude API key and tier to the running worker process. */
+function syncClaudeConfigToWorker() {
+  const claudeKey = licenseManager.getClaudeApiKey();
+  const license = licenseManager.getCurrent();
+  const workerUrl = workerManager?.getUrl?.() || 'http://localhost:3001';
+  fetch(`${workerUrl}/config`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ claudeApiKey: claudeKey || '', tier: license.tier || '' }),
+  }).catch(err => console.warn('[main] Failed to sync Claude config to worker:', err.message));
+}
 
 // ─── File Dialogs ───
 ipcMain.handle('dialog:openFolder', async () => {

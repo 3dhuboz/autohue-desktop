@@ -103,6 +103,11 @@ class WorkerManager {
     }
   }
 
+  /** Get the worker base URL. */
+  getUrl() {
+    return `http://localhost:${this.port}`;
+  }
+
   /** Check worker health. */
   async checkHealth() {
     try {

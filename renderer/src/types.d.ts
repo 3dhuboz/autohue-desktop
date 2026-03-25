@@ -16,6 +16,10 @@ interface ElectronAPI {
   getSetting: (key: string) => Promise<string | null>;
   setSetting: (key: string, value: string) => Promise<boolean>;
 
+  // Claude Vision API
+  getClaudeKeyStatus: () => Promise<ClaudeKeyStatus>;
+  setClaudeKey: (key: string) => Promise<{ success: boolean }>;
+
   // History
   getHistory: () => Promise<HistoryEntry[]>;
   deleteHistory: (id: number) => Promise<boolean>;
@@ -74,6 +78,13 @@ interface HistoryEntry {
   duration_seconds: number | null;
   status: string;
   created_at: string;
+}
+
+interface ClaudeKeyStatus {
+  hasKey: boolean;
+  source: 'custom' | 'platform' | 'none';
+  eligible: boolean;
+  tier?: string;
 }
 
 interface WorkerHealth {
