@@ -54,13 +54,41 @@ class WorkerManager {
     console.log(`[worker] Starting on port ${this.port}...`);
     console.log(`[worker] Server: ${serverPath}`);
     console.log(`[worker] Storage: ${this.storagePath}`);
+    console.log(`[worker] Claude API key: ${this.claudeApiKey ? 'SET (' + this.claudeApiKey.slice(0, 12) + '...)' : 'NOT SET'}`);
+
+    // Read Claude key from DB directly as fallback (belt + suspenders)
+    let claudeKey = this.claudeApiKey;
+    if (!claudeKey) {
+      try {
+        const { app } = require('electron');
+        const dbPath = path.join(app.getPath('userData'), 'autohue.db');
+        if (fs.existsSync(dbPath)) {
+          const initSqlJs = require('sql.js');
+          const SQL = await initSqlJs();
+          const buf = fs.readFileSync(dbPath);
+          const db = new SQL.Database(buf);
+          const result = db.exec("SELECT value FROM settings WHERE key='claude_api_key'");
+          if (result.length > 0 && result[0].values.length > 0) {
+            claudeKey = result[0].values[0][0];
+            if (claudeKey) console.log(`[worker] Claude key found in DB: ${claudeKey.slice(0, 12)}...`);
+          }
+          db.close();
+        }
+      } catch (err) {
+        console.warn('[worker] Failed to read Claude key from DB:', err.message);
+      }
+    }
+
+    if (claudeKey) {
+      console.log(`[worker] Passing CLAUDE_API_KEY to worker env: ${claudeKey.slice(0, 12)}...`);
+    }
 
     this.process = fork(serverPath, [], {
       env: {
         ...process.env,
         PORT: String(this.port),
         STORAGE_ROOT: this.storagePath,
-        ...(this.claudeApiKey ? { CLAUDE_API_KEY: this.claudeApiKey } : {}),
+        ...(claudeKey ? { CLAUDE_API_KEY: claudeKey } : {}),
       },
       silent: true, // capture stdout/stderr
     });
