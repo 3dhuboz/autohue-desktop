@@ -83,10 +83,11 @@ app.whenReady().then(async () => {
     }
   }
 
-  // 3. Try to get Claude API key for Pro/Unlimited users (enables Vision pipeline)
-  const claudeKey = licenseManager.getClaudeApiKey();
+  // 3. Try to get Claude API key — check custom key first, then platform key
+  const customKeyRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('claude_api_key');
+  const claudeKey = (customKeyRow ? customKeyRow.value : null) || licenseManager.getClaudeApiKey();
   if (claudeKey) {
-    console.log('[main] Claude Vision API key available — enabling fast pipeline');
+    console.log(`[main] Claude Vision API key available (${customKeyRow ? 'custom' : 'platform'}) — enabling fast pipeline`);
   }
 
   // 4. Start the AI worker process
@@ -191,13 +192,18 @@ ipcMain.handle('settings:set', (_, key, value) => {
 
 // ─── Claude Vision API Key ───
 ipcMain.handle('settings:getClaudeKey', () => {
-  const claudeKey = licenseManager.getClaudeApiKey();
+  // Check custom key first (user-entered), then platform key (from license validation)
+  const customRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('claude_api_key');
+  const customKey = customRow ? customRow.value : null;
+  const platformKey = licenseManager.getClaudeApiKey();
+  const activeKey = customKey || platformKey;
+
   const license = licenseManager.getCurrent();
   const tier = (license.tier || '').toLowerCase();
   return {
-    hasKey: !!claudeKey,
-    source: claudeKey ? 'platform' : 'none',
-    eligible: ['pro', 'unlimited'].includes(tier) || license.isUnlimited === true,
+    hasKey: !!activeKey,
+    source: customKey ? 'custom' : platformKey ? 'platform' : 'none',
+    eligible: ['pro', 'unlimited'].includes(tier) || license.isUnlimited === true || license.active,
     tier,
   };
 });
@@ -207,8 +213,12 @@ ipcMain.handle('settings:setClaudeKey', (_, key) => {
   if (key) {
     db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('claude_api_key', key);
     if (workerManager) workerManager.setClaudeApiKey(key);
+    console.log('[main] Claude Vision key saved and sent to worker');
   } else {
     db.prepare('DELETE FROM settings WHERE key = ?').run('claude_api_key');
+    // Revert to platform key if available
+    const platformKey = licenseManager.getClaudeApiKey();
+    if (workerManager && platformKey) workerManager.setClaudeApiKey(platformKey);
   }
   return true;
 });
