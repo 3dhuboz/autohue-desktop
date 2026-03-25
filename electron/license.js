@@ -313,7 +313,6 @@ class LicenseManager {
     }
     return false;
   }
-}
 
   /** Get the cached Claude API key (returned by server for Pro/Unlimited). */
   getClaudeApiKey() {
