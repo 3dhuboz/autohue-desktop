@@ -82,7 +82,7 @@ async function classifyWithClaude(imagePath) {
                     role: 'user',
                     content: [
                         { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
-                        { type: 'text', text: 'What color is the car or vehicle in this photo? Reply with ONLY one word from: red, blue, green, yellow, gold, orange, purple, pink, brown, black, white, silver-grey. If no vehicle or unsure, reply: unknown' }
+                        { type: 'text', text: 'What is the body color of the MAIN vehicle (largest/most prominent car or truck) in this photo? Ignore background vehicles, signage, and surroundings. Reply with ONLY one word from: red, blue, green, yellow, gold, orange, purple, pink, brown, black, white, silver-grey. If truly no vehicle visible, reply: unknown' }
                     ]
                 }]
             }),
@@ -1427,8 +1427,9 @@ async function processSession(sessionId) {
         let colorInfo;
         if (isClaudeVisionEnabled()) {
             colorInfo = await classifyWithClaude(filePath);
-            if (!colorInfo) {
-                console.log(`  [claude] Fallback to local pipeline for ${file}`);
+            // Fall back to local pipeline if Claude fails OR returns unknown
+            if (!colorInfo || colorInfo.category === 'unknown') {
+                console.log(`  [claude] ${!colorInfo ? 'API failed' : 'returned unknown'} — falling back to local pipeline for ${file}`);
                 colorInfo = await analyzeImageColor(filePath);
             }
         } else {
