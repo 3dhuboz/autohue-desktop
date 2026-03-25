@@ -1,6 +1,6 @@
 {
   "name": "autohue-desktop",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "description": "AutoHue — AI-powered car photo color sorter for motorsport photographers",
   "main": "electron/main.js",
   "private": true,
