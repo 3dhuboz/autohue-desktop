@@ -66,8 +66,8 @@ app.whenReady().then(async () => {
       console.log('[dev] No license found — seeding Unlimited test license');
       db.prepare(`
         INSERT OR REPLACE INTO license (id, license_key, tier, daily_limit, machine_id,
-          activated_at, expires_at, last_validated, validation_response)
-        VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
+          activated_at, expires_at, last_validated, validation_response, subscription_status)
+        VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         'AH-UNL-DEV0-MODE-TEST-KEY0',
         'unlimited',
@@ -77,6 +77,7 @@ app.whenReady().then(async () => {
         null,
         new Date().toISOString(),
         null,
+        'active',
       );
       console.log('[dev] Unlimited license activated');
     }
@@ -185,6 +186,30 @@ ipcMain.handle('settings:get', (_, key) => {
 
 ipcMain.handle('settings:set', (_, key, value) => {
   db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(key, value);
+  return true;
+});
+
+// ─── Claude Vision API Key ───
+ipcMain.handle('settings:getClaudeKey', () => {
+  const claudeKey = licenseManager.getClaudeApiKey();
+  const license = licenseManager.getCurrent();
+  const tier = (license.tier || '').toLowerCase();
+  return {
+    hasKey: !!claudeKey,
+    source: claudeKey ? 'platform' : 'none',
+    eligible: ['pro', 'unlimited'].includes(tier) || license.isUnlimited === true,
+    tier,
+  };
+});
+
+ipcMain.handle('settings:setClaudeKey', (_, key) => {
+  // Custom key override — store in settings and pass to worker
+  if (key) {
+    db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('claude_api_key', key);
+    if (workerManager) workerManager.setClaudeApiKey(key);
+  } else {
+    db.prepare('DELETE FROM settings WHERE key = ?').run('claude_api_key');
+  }
   return true;
 });
 

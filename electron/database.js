@@ -146,6 +146,7 @@ async function initDatabase(dbPath) {
       expires_at TEXT,
       last_validated TEXT NOT NULL,
       validation_response TEXT,
+      subscription_status TEXT DEFAULT 'active',
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now'))
     );
