@@ -1,6 +1,6 @@
 {
   "name": "autohue-desktop",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "description": "AutoHue — AI-powered car photo color sorter for motorsport photographers",
   "main": "electron/main.js",
   "private": true,
@@ -25,6 +25,31 @@
     "unzipper": "^0.12.3",
     "uuid": "^11.1.0"
   },
+  "build": {
+    "appId": "au.com.3dhub.autohue",
+    "productName": "AutoHue",
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "icon": "build/icon.ico",
+      "target": "nsis"
+    },
+    "mac": {
+      "icon": "build/icon.png",
+      "target": ["dmg"]
+    },
+    "nsis": {
+      "oneClick": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "3dhuboz",
+      "repo": "autohue-desktop"
+    }
+  },
   "devDependencies": {
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
@@ -37,7 +62,9 @@
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
     "react-router-dom": "^7.1.0",
+    "sharp": "^0.34.5",
     "tailwindcss": "^3.4.17",
+    "to-ico": "^1.1.5",
     "typescript": "^5.7.0",
     "vite": "^6.0.0",
     "wait-on": "^8.0.0"
