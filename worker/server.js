@@ -1327,19 +1327,17 @@ async function processSession(sessionId) {
     session.results = [];
     session.colorCounts = {};
 
-    // Phase 3: Process each image
-    for (let i = 0; i < files.length; i++) {
-        const filePath = files[i];
+    // Phase 3: Process images in parallel batches for speed
+    const CONCURRENCY = Math.min(6, Math.max(2, require('os').cpus().length - 1));
+    console.log(`[${sessionId}] Processing ${files.length} images with concurrency=${CONCURRENCY}`);
+    let completedCount = 0;
+
+    async function processOneImage(filePath, index) {
         const file = path.basename(filePath);
-        session.currentFile = file;
-        session.processed = i;
 
         const colorInfo = await analyzeImageColor(filePath);
+        const thumbUrl = await generateThumb(filePath, sessionId, `${index}_${file}`);
 
-        // Generate thumbnail for live preview
-        const thumbUrl = await generateThumb(filePath, sessionId, `${i}_${file}`);
-
-        // Send to review if unknown, no confidence, or very low confidence (Delta-E > 24 / all methods disagree)
         const needsReview = colorInfo.category === 'unknown' || colorInfo.confidence === 'none' || colorInfo.confidence === 'very-low';
         const folderName = needsReview ? 'please-double-check' : colorInfo.category;
 
@@ -1355,8 +1353,11 @@ async function processSession(sessionId) {
         }
         fs.copyFileSync(filePath, path.join(colorFolder, destName));
 
-        // Track color counts live
+        // Update session state (synchronized via single-threaded Node.js event loop)
+        completedCount++;
         session.colorCounts[folderName] = (session.colorCounts[folderName] || 0) + 1;
+        session.currentFile = file;
+        session.processed = completedCount;
 
         session.results.push({
             filename: file,
@@ -1375,13 +1376,20 @@ async function processSession(sessionId) {
             console.log(`[${sessionId}] Review needed: ${file} → ${colorInfo.category} (confidence: ${colorInfo.confidence})`);
         }
 
-        // Update processed count immediately after each image
-        session.processed = i + 1;
-
-        if ((i + 1) % 10 === 0) {
-            console.log(`[${sessionId}] Processed ${i + 1}/${files.length}`);
+        if (completedCount % 10 === 0) {
+            console.log(`[${sessionId}] Processed ${completedCount}/${files.length}`);
         }
     }
+
+    // Process in parallel with bounded concurrency
+    let cursor = 0;
+    async function runWorker() {
+        while (cursor < files.length) {
+            const idx = cursor++;
+            await processOneImage(files[idx], idx);
+        }
+    }
+    await Promise.all(Array.from({ length: CONCURRENCY }, () => runWorker()));
 
     session.status = 'completed';
     session.currentFile = '';
