@@ -1,6 +1,6 @@
 {
   "name": "autohue-desktop",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "AutoHue — AI-powered car photo color sorter for motorsport photographers",
   "main": "electron/main.js",
   "private": true,
@@ -31,6 +31,20 @@
     "directories": {
       "output": "dist"
     },
+    "files": [
+      "electron/**/*",
+      "dist-renderer/**/*",
+      "worker/**/*",
+      "node_modules/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "worker",
+        "to": "worker",
+        "filter": ["**/*", "!node_modules"]
+      }
+    ],
     "win": {
       "icon": "build/icon.ico",
       "target": "nsis"

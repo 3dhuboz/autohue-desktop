@@ -93,14 +93,13 @@ app.whenReady().then(async () => {
   // 4. Create window
   createWindow();
 
-  // 5. Check for updates (production only)
+  // 5. Check for updates (production only — silent fail for private repos)
   if (!isDev) {
     try {
       const { autoUpdater } = require('electron-updater');
-      autoUpdater.checkForUpdatesAndNotify();
-    } catch (err) {
-      console.error('Auto-updater error:', err.message);
-    }
+      autoUpdater.logger = { info: () => {}, warn: () => {}, error: () => {} };
+      autoUpdater.checkForUpdatesAndNotify().catch(() => {});
+    } catch (_) {}
   }
 });
 
