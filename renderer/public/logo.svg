@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <linearGradient id="ring" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FF4444"/>
+      <stop offset="25%" stop-color="#FF8C00"/>
+      <stop offset="50%" stop-color="#FFD700"/>
+      <stop offset="75%" stop-color="#00C853"/>
+      <stop offset="100%" stop-color="#2979FF"/>
+    </linearGradient>
+    <linearGradient id="car" x1="100" y1="200" x2="400" y2="350" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="100%" stop-color="#B0B0B0"/>
+    </linearGradient>
+    <radialGradient id="bg" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#1A1A2E"/>
+      <stop offset="100%" stop-color="#0D0D1A"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Background circle -->
+  <circle cx="256" cy="256" r="248" fill="url(#bg)"/>
+
+  <!-- Colour ring -->
+  <circle cx="256" cy="256" r="240" stroke="url(#ring)" stroke-width="16" fill="none" stroke-linecap="round"/>
+
+  <!-- Car body silhouette -->
+  <g transform="translate(256,270)">
+    <!-- Main body -->
+    <path d="M-130,20 L-130,-10 Q-130,-30 -110,-30 L-80,-30 L-55,-75 Q-45,-90 -25,-90 L70,-90 Q90,-90 100,-75 L125,-30 L140,-30 Q155,-30 155,-10 L155,20 Z" fill="url(#car)" opacity="0.95"/>
+
+    <!-- Windshield -->
+    <path d="M-50,-28 L-30,-72 Q-25,-82 -15,-82 L55,-82 Q65,-82 72,-72 L92,-28 Z" fill="#0D0D1A" opacity="0.7"/>
+
+    <!-- Headlight left -->
+    <rect x="-128" y="-20" width="22" height="14" rx="4" fill="#FFD700" opacity="0.9"/>
+
+    <!-- Headlight right -->
+    <rect x="133" y="-20" width="22" height="14" rx="4" fill="#FF4444" opacity="0.9"/>
+
+    <!-- Wheel left -->
+    <circle cx="-75" cy="25" r="28" fill="#1A1A2E" stroke="#666" stroke-width="4"/>
+    <circle cx="-75" cy="25" r="12" fill="#333" stroke="#888" stroke-width="2"/>
+
+    <!-- Wheel right -->
+    <circle cx="100" cy="25" r="28" fill="#1A1A2E" stroke="#666" stroke-width="4"/>
+    <circle cx="100" cy="25" r="12" fill="#333" stroke="#888" stroke-width="2"/>
+
+    <!-- Color dots on car body - the sorting concept -->
+    <circle cx="-40" cy="-10" r="8" fill="#FF4444" opacity="0.8"/>
+    <circle cx="-15" cy="-10" r="8" fill="#FF8C00" opacity="0.8"/>
+    <circle cx="10" cy="-10" r="8" fill="#FFD700" opacity="0.8"/>
+    <circle cx="35" cy="-10" r="8" fill="#00C853" opacity="0.8"/>
+    <circle cx="60" cy="-10" r="8" fill="#2979FF" opacity="0.8"/>
+  </g>
+
+  <!-- "A" lettermark subtle -->
+  <text x="256" y="170" text-anchor="middle" font-family="Arial Black, sans-serif" font-size="60" font-weight="900" fill="url(#ring)" opacity="0.15">A</text>
+</svg>

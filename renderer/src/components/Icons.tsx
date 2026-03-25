@@ -11,16 +11,26 @@ const s = (size?: number) => ({ width: size || 16, height: size || 16 });
 
 export function LogoMark({ className, size = 32 }: IconProps) {
   return (
-    <svg viewBox="0 0 40 40" fill="none" {...s(size)} className={className}>
+    <svg viewBox="0 0 64 64" fill="none" {...s(size)} className={className}>
       <defs>
-        <linearGradient id="logo-grad" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#ef4444" />
-          <stop offset="100%" stopColor="#991b1b" />
+        <linearGradient id="logo-ring" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#FF4444"/>
+          <stop offset="25%" stopColor="#FF8C00"/>
+          <stop offset="50%" stopColor="#FFD700"/>
+          <stop offset="75%" stopColor="#00C853"/>
+          <stop offset="100%" stopColor="#2979FF"/>
         </linearGradient>
       </defs>
-      <rect width="40" height="40" rx="10" fill="url(#logo-grad)" />
-      <path d="M12 28L20 10L28 28H24L20 18L16 28H12Z" fill="white" fillOpacity="0.95" />
-      <rect x="14" y="25" width="12" height="2.5" rx="1.25" fill="white" fillOpacity="0.6" />
+      <rect width="64" height="64" rx="14" fill="#1A1A2E"/>
+      <circle cx="32" cy="32" r="27" stroke="url(#logo-ring)" strokeWidth="3.5" fill="none"/>
+      <g transform="translate(32,36)">
+        <path d="M-17,3 L-17,-2 L-13,-13 Q-11,-17 -7,-17 L9,-17 Q13,-17 15,-13 L19,-2 L19,3 Z" fill="white" fillOpacity="0.9"/>
+        <circle cx="-9" cy="5" r="3.5" fill="#1A1A2E"/>
+        <circle cx="13" cy="5" r="3.5" fill="#1A1A2E"/>
+        <circle cx="-4" cy="-4" r="2" fill="#FF4444"/>
+        <circle cx="2" cy="-4" r="2" fill="#FFD700"/>
+        <circle cx="8" cy="-4" r="2" fill="#2979FF"/>
+      </g>
     </svg>
   );
 }
