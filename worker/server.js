@@ -1332,7 +1332,16 @@ async function processSession(sessionId) {
     console.log(`[${sessionId}] Processing ${files.length} images with concurrency=${CONCURRENCY}`);
     let completedCount = 0;
 
+    // Wait while paused, abort if cancelled
+    async function waitIfPaused() {
+        while (session.status === 'paused') {
+            await new Promise(r => setTimeout(r, 250));
+        }
+        if (session.status === 'cancelled') throw new Error('CANCELLED');
+    }
+
     async function processOneImage(filePath, index) {
+        await waitIfPaused();
         const file = path.basename(filePath);
 
         const colorInfo = await analyzeImageColor(filePath);
@@ -1389,11 +1398,19 @@ async function processSession(sessionId) {
             await processOneImage(files[idx], idx);
         }
     }
-    await Promise.all(Array.from({ length: CONCURRENCY }, () => runWorker()));
-
-    session.status = 'completed';
-    session.currentFile = '';
-    console.log(`[${sessionId}] Complete! ${files.length} images sorted.`);
+    try {
+        await Promise.all(Array.from({ length: CONCURRENCY }, () => runWorker()));
+        session.status = 'completed';
+        session.currentFile = '';
+        console.log(`[${sessionId}] Complete! ${files.length} images sorted.`);
+    } catch (err) {
+        if (err.message === 'CANCELLED') {
+            session.currentFile = '';
+            console.log(`[${sessionId}] Cancelled after ${completedCount}/${files.length} images.`);
+        } else {
+            throw err;
+        }
+    }
 }
 
 // ─── Upload endpoint ───
@@ -1551,6 +1568,40 @@ app.post('/sort-local', async (req, res) => {
         message: 'Processing started',
         total_images: sourceFiles.length
     });
+});
+
+// ─── Pause / Resume / Cancel endpoints ───
+app.post('/pause/:sessionId', (req, res) => {
+    const session = sessions[req.params.sessionId];
+    if (!session) return res.status(404).json({ error: 'Session not found' });
+    if (session.status === 'processing') {
+        session.status = 'paused';
+        console.log(`[${req.params.sessionId}] Paused at ${session.processed}/${session.total}`);
+        return res.json({ success: true, status: 'paused' });
+    }
+    res.json({ success: false, status: session.status, message: 'Can only pause a processing session' });
+});
+
+app.post('/resume/:sessionId', (req, res) => {
+    const session = sessions[req.params.sessionId];
+    if (!session) return res.status(404).json({ error: 'Session not found' });
+    if (session.status === 'paused') {
+        session.status = 'processing';
+        console.log(`[${req.params.sessionId}] Resumed at ${session.processed}/${session.total}`);
+        return res.json({ success: true, status: 'processing' });
+    }
+    res.json({ success: false, status: session.status, message: 'Can only resume a paused session' });
+});
+
+app.post('/cancel/:sessionId', (req, res) => {
+    const session = sessions[req.params.sessionId];
+    if (!session) return res.status(404).json({ error: 'Session not found' });
+    if (session.status === 'processing' || session.status === 'paused') {
+        session.status = 'cancelled';
+        console.log(`[${req.params.sessionId}] Cancelled at ${session.processed}/${session.total}`);
+        return res.json({ success: true, status: 'cancelled' });
+    }
+    res.json({ success: false, status: session.status, message: 'Can only cancel an active session' });
 });
 
 // ─── Status endpoint (returns live progress + recent results) ───

@@ -76,6 +76,7 @@ export default function SortPage() {
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<{ percent: number; loaded: number; total: number; speed: number } | null>(null);
   const [expandedColor, setExpandedColor] = useState<string | null>(null);
+  const [paused, setPaused] = useState(false);
   const [stats, setStats] = useState<ProcessingStats>({
     processed: 0, total: 0, currentFile: '', startTime: 0,
     imagesPerSecond: 0, avgConfidence: 0, timeSavedSeconds: 0,
@@ -92,11 +93,40 @@ export default function SortPage() {
 
   useEffect(() => {
     mountedRef.current = true;
+
+    // Reconnect to active session if we navigated away and came back
+    const savedSession = localStorage.getItem('autohue_active_session');
+    if (savedSession && workerUrl) {
+      const { sid, startTime } = JSON.parse(savedSession);
+      fetch(`${workerUrl}/status/${sid}`)
+        .then(r => r.ok ? r.json() : null)
+        .then(data => {
+          if (!data || !mountedRef.current) return;
+          if (data.status === 'processing' || data.status === 'paused') {
+            setSessionId(sid);
+            setPaused(data.status === 'paused');
+            setStats(prev => ({ ...prev, total: data.total, processed: data.processed, startTime: startTime || Date.now(), currentFile: data.current_file || '' }));
+            setPhase('processing');
+            cursorRef.current = data.processed;
+            startPolling(sid);
+          } else if (data.status === 'completed') {
+            setSessionId(sid);
+            setStats(prev => ({ ...prev, total: data.total, processed: data.processed, startTime: startTime || Date.now() }));
+            setPhase('complete');
+            localStorage.removeItem('autohue_active_session');
+          } else {
+            localStorage.removeItem('autohue_active_session');
+          }
+        })
+        .catch(() => localStorage.removeItem('autohue_active_session'));
+    }
+
     return () => {
       mountedRef.current = false;
       if (pollRef.current) clearInterval(pollRef.current);
     };
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workerUrl]);
 
   const handleFiles = useCallback((newFiles: FileList | File[]) => {
     const arr = Array.from(newFiles).filter(f =>
@@ -199,6 +229,7 @@ export default function SortPage() {
       });
       setPhase('processing');
       setUploading(false);
+      localStorage.setItem('autohue_active_session', JSON.stringify({ sid: data.session_id, startTime: Date.now() }));
       startPolling(data.session_id);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Processing failed.');
@@ -261,8 +292,15 @@ export default function SortPage() {
           });
         }
 
-        if (data.status === 'completed') {
+        if (data.status === 'paused') {
+          setPaused(true);
+        } else if (data.status === 'processing') {
+          setPaused(false);
+        }
+
+        if (data.status === 'completed' || data.status === 'cancelled') {
           if (pollRef.current) clearInterval(pollRef.current);
+          localStorage.removeItem('autohue_active_session');
           setPhase('complete');
           if (!completionRecorded.current) {
             completionRecorded.current = true;
@@ -538,10 +576,40 @@ export default function SortPage() {
           <div className="animate-fade-up space-y-6">
             <div className="text-center mb-4">
               <h2 className="text-2xl font-heading font-black text-white flex items-center justify-center gap-3">
-                <FlagIcon size={24} className="text-racing-500 animate-pulse" />
-                Sorting in Progress
+                <FlagIcon size={24} className={`text-racing-500 ${paused ? '' : 'animate-pulse'}`} />
+                {paused ? 'Sorting Paused' : 'Sorting in Progress'}
               </h2>
-              <p className="text-white/30 text-sm mt-1">AI is detecting cars and classifying colors</p>
+              <p className="text-white/30 text-sm mt-1">
+                {paused ? 'Processing is paused — you can navigate away safely' : 'AI is detecting cars and classifying colors'}
+              </p>
+              <div className="flex items-center justify-center gap-3 mt-4">
+                {paused ? (
+                  <button
+                    onClick={() => { fetch(`${workerUrl}/resume/${sessionId}`, { method: 'POST' }); setPaused(false); }}
+                    className="btn-racing px-6 py-2 rounded-xl text-sm flex items-center gap-2"
+                  >
+                    <FlagIcon size={14} /> Resume
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => { fetch(`${workerUrl}/pause/${sessionId}`, { method: 'POST' }); setPaused(true); }}
+                    className="btn-carbon px-6 py-2 rounded-xl text-sm flex items-center gap-2 border border-white/10"
+                  >
+                    <span className="w-3 h-3 rounded-sm bg-white/50" /> Pause
+                  </button>
+                )}
+                <button
+                  onClick={() => {
+                    if (confirm('Cancel sorting? Images already sorted will be kept.')) {
+                      fetch(`${workerUrl}/cancel/${sessionId}`, { method: 'POST' });
+                      localStorage.removeItem('autohue_active_session');
+                    }
+                  }}
+                  className="text-xs text-white/30 hover:text-red-400 transition-colors px-4 py-2 rounded-xl flex items-center gap-2"
+                >
+                  <CloseIcon size={12} /> Cancel
+                </button>
+              </div>
             </div>
 
             {/* Gauges */}
