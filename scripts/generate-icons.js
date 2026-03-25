@@ -29,8 +29,8 @@ async function main() {
     fs.writeFileSync(path.join(BUILD, `icon-${size}.png`), buf);
   }
 
-  // Main icon.png (256px for electron-builder)
-  fs.writeFileSync(path.join(BUILD, 'icon.png'), pngBuffers[256]);
+  // Main icon.png (1024px for electron-builder — macOS requires 512+)
+  fs.writeFileSync(path.join(BUILD, 'icon.png'), pngBuffers[1024]);
   console.log('icon.png (256px)');
 
   // Windows .ico (contains 16, 32, 48, 256)
