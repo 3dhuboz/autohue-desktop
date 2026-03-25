@@ -136,11 +136,13 @@ ipcMain.handle('settings:getClaudeKey', () => {
   const license = licenseManager.getCurrent();
   const hasEmbedded = !!licenseManager.db.prepare("SELECT value FROM settings WHERE key = 'claude_api_key_embedded'").get()?.value;
   const hasCustom = !!licenseManager.db.prepare("SELECT value FROM settings WHERE key = 'claude_api_key_custom'").get()?.value;
+  const tier = (license.tier || '').toLowerCase();
+  console.log(`[claude-key-status] tier=${tier}, active=${license.active}, hasCustom=${hasCustom}, hasEmbedded=${hasEmbedded}`);
   return {
     hasKey: !!custom,
     source: hasCustom ? 'custom' : hasEmbedded ? 'platform' : 'none',
-    eligible: ['pro', 'unlimited'].includes(license.tier),
-    tier: license.tier,
+    eligible: ['pro', 'unlimited'].includes(tier) || license.isUnlimited === true,
+    tier,
   };
 });
 ipcMain.handle('settings:setClaudeKey', (_, key) => {
