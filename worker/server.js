@@ -1406,7 +1406,83 @@ function collectImageFiles(dir) {
         .map(f => path.join(dir, f));
 }
 
-// ─── Process all images in a session ───
+// ─── Process a list of image files for a session (used by both directory and archive paths) ───
+async function processSessionFiles(sessionId, files) {
+    const session = sessions[sessionId];
+    if (!session) return;
+
+    const outputDir = path.join(OUTPUT_DIR, sessionId);
+    fs.mkdirSync(outputDir, { recursive: true });
+
+    session.results = [];
+    session.colorCounts = {};
+    let completedCount = 0;
+
+    async function waitIfPaused() {
+        while (session.status === 'paused') {
+            await new Promise(r => setTimeout(r, 250));
+        }
+        if (session.status === 'cancelled') throw new Error('CANCELLED');
+    }
+
+    async function processOneImage(filePath, index) {
+        await waitIfPaused();
+        const file = path.basename(filePath);
+
+        const colorInfo = await analyzeImageColor(filePath);
+        const thumbUrl = await generateThumb(filePath, sessionId, `${index}_${file}`);
+
+        const needsReview = colorInfo.category === 'unknown' || colorInfo.confidence === 'none' || colorInfo.confidence === 'very-low';
+        const folderName = needsReview ? 'please-double-check' : colorInfo.category;
+
+        const colorFolder = path.join(outputDir, folderName);
+        fs.mkdirSync(colorFolder, { recursive: true });
+        let destName = file;
+        let counter = 1;
+        while (fs.existsSync(path.join(colorFolder, destName))) {
+            const ext = path.extname(file);
+            destName = `${path.basename(file, ext)}_${counter}${ext}`;
+            counter++;
+        }
+        fs.copyFileSync(filePath, path.join(colorFolder, destName));
+
+        completedCount++;
+        session.colorCounts[folderName] = (session.colorCounts[folderName] || 0) + 1;
+        session.currentFile = file;
+        session.processed = completedCount;
+
+        session.results.push({
+            filename: file, color: folderName, hex: colorInfo.hex, rgb: colorInfo.rgb,
+            thumb: thumbUrl, confidence: colorInfo.confidence || 'unknown',
+            regions: colorInfo.regionsAgreeing ? `${colorInfo.regionsAgreeing}/${colorInfo.totalRegions}` : null,
+            needsReview, originalColor: needsReview ? colorInfo.category : null,
+            status: needsReview ? 'Needs Review' : 'Success'
+        });
+
+        if (completedCount % 10 === 0) {
+            console.log(`[${sessionId}] Processed ${completedCount}/${files.length}`);
+        }
+    }
+
+    try {
+        console.log(`[${sessionId}] Processing ${files.length} images`);
+        for (let i = 0; i < files.length; i++) {
+            await processOneImage(files[i], i);
+        }
+        session.status = 'completed';
+        session.currentFile = '';
+        console.log(`[${sessionId}] Complete! ${files.length} images sorted.`);
+    } catch (err) {
+        if (err.message === 'CANCELLED') {
+            session.currentFile = '';
+            console.log(`[${sessionId}] Cancelled after ${completedCount}/${files.length} images.`);
+        } else {
+            throw err;
+        }
+    }
+}
+
+// ─── Process all images in a session (directory-based upload) ───
 async function processSession(sessionId) {
     const session = sessions[sessionId];
     if (!session) return;
@@ -1619,27 +1695,53 @@ app.post('/sort-local', async (req, res) => {
     const sessionUploadDir = path.join(UPLOAD_DIR, sessionId);
     fs.mkdirSync(sessionUploadDir, { recursive: true });
 
-    // If inputPath is an archive file (ZIP/RAR), copy it directly to session dir for extraction
+    // If inputPath is an archive file (ZIP/RAR), extract directly from original location
+    // No copying or symlinking — the worker reads the archive in-place
     const isArchiveFile = stat.isFile() && /\.(zip|rar)$/i.test(inputPath);
     if (isArchiveFile) {
-        console.log(`[${sessionId}] sort-local: archive file detected → ${path.basename(inputPath)} (${(stat.size / 1024 / 1024).toFixed(0)}MB)`);
-        const destName = path.basename(inputPath);
-        // Symlink instead of copy for large archives (instant, no disk waste)
-        try {
-            fs.symlinkSync(inputPath, path.join(sessionUploadDir, destName));
-        } catch {
-            // Symlink may fail on Windows without elevated perms — fall back to copy
-            fs.copyFileSync(inputPath, path.join(sessionUploadDir, destName));
-        }
-        // processSession will extract the archive and find images inside
+        const sizeMB = (stat.size / 1024 / 1024).toFixed(0);
+        console.log(`[${sessionId}] sort-local: archive file detected → ${path.basename(inputPath)} (${sizeMB}MB)`);
+
         const session = {
-            id: sessionId, status: 'queued', total_images: 0,
-            processed: 0, results: [], startedAt: new Date().toISOString(),
+            id: sessionId, status: 'extracting', total_images: 0,
+            total: 0, processed: 0, results: [], startedAt: new Date().toISOString(),
+            currentFile: `Extracting ${path.basename(inputPath)} (${sizeMB}MB)...`,
         };
         sessions[sessionId] = session;
-        processSession(sessionId, sessionUploadDir).catch(err =>
-            console.error(`[${sessionId}] processSession error:`, err.message)
-        );
+
+        // Extract directly from the original archive path into the session extract dir
+        const extractDir = path.join(sessionUploadDir, '_extracted');
+        fs.mkdirSync(extractDir, { recursive: true });
+
+        (async () => {
+            try {
+                let imageCount = 0;
+                if (/\.zip$/i.test(inputPath)) {
+                    imageCount = await extractZip(inputPath, extractDir, session);
+                } else if (/\.rar$/i.test(inputPath)) {
+                    imageCount = await extractRar(inputPath, extractDir, session);
+                }
+                console.log(`[${sessionId}] Extracted ${imageCount} images from archive`);
+
+                // Now collect and process
+                const files = collectImageFiles(extractDir);
+                if (files.length === 0) {
+                    session.status = 'completed';
+                    session.total = 0;
+                    session.currentFile = 'No images found in archive';
+                    return;
+                }
+                session.total = files.length;
+                session.total_images = files.length;
+                session.status = 'processing';
+                await processSessionFiles(sessionId, files);
+            } catch (err) {
+                console.error(`[${sessionId}] Archive processing error:`, err.message);
+                session.status = 'error';
+                session.error = err.message;
+            }
+        })();
+
         return res.json({ session_id: sessionId, total_images: 0, status: 'extracting' });
     }
 
