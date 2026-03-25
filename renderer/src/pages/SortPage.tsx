@@ -176,18 +176,24 @@ export default function SortPage() {
     try {
       let data: { session_id: string; total_images?: number };
 
-      if (folderPath) {
+      // For archives (ZIP/RAR) or folders, use sort-local with the native file path
+      // This avoids copying GBs of data through HTTP — the worker reads directly from disk
+      const archiveFile = !folderPath && files.length === 1 && /\.(zip|rar)$/i.test(files[0].name) ? files[0] : null;
+      const localPath = folderPath || (archiveFile && (archiveFile as any).path) || null;
+
+      if (localPath) {
         const res = await fetch(`${workerUrl}/sort-local`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ inputPath: folderPath }),
+          body: JSON.stringify({ inputPath: localPath }),
         });
         if (!res.ok) {
           const errData = await res.json().catch(() => null);
-          throw new Error(errData?.error || 'Failed to start folder processing');
+          throw new Error(errData?.error || 'Failed to start processing');
         }
         data = await res.json();
       } else {
+        // Multiple loose image files — upload via HTTP with progress
         const formData = new FormData();
         files.forEach(f => formData.append('files', f));
         setUploadProgress({ percent: 0, loaded: 0, total: 0, speed: 0 });

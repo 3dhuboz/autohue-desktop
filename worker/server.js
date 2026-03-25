@@ -1474,11 +1474,14 @@ app.post('/sort-local', async (req, res) => {
         return res.status(400).json({ error: 'inputPath is required' });
     }
 
-    // Validate inputPath exists and is a directory
+    // Validate inputPath exists (directory OR archive file)
+    let isArchive = false;
     try {
         const stat = fs.statSync(inputPath);
-        if (!stat.isDirectory()) {
-            return res.status(400).json({ error: 'inputPath is not a directory' });
+        if (stat.isFile() && /\.(zip|rar)$/i.test(inputPath)) {
+            isArchive = true;
+        } else if (!stat.isDirectory()) {
+            return res.status(400).json({ error: 'inputPath must be a directory or ZIP/RAR file' });
         }
     } catch (err) {
         return res.status(400).json({ error: `inputPath not accessible: ${err.message}` });
@@ -1487,6 +1490,34 @@ app.post('/sort-local', async (req, res) => {
     const sessionId = crypto.randomUUID();
     const sessionUploadDir = path.join(UPLOAD_DIR, sessionId);
     fs.mkdirSync(sessionUploadDir, { recursive: true });
+
+    // If it's an archive, copy it into the session upload dir and let processSession extract it
+    if (isArchive) {
+        const destName = path.basename(inputPath);
+        fs.copyFileSync(inputPath, path.join(sessionUploadDir, destName));
+        console.log(`[${sessionId}] sort-local: archive ${destName} (${(fs.statSync(inputPath).size / (1024*1024)).toFixed(0)} MB) — copied to session dir`);
+
+        sessions[sessionId] = {
+            status: 'queued',
+            total: 0,
+            processed: 0,
+            currentFile: 'Extracting archive...',
+            results: [],
+            colorCounts: {}
+        };
+
+        processSession(sessionId).catch(err => {
+            console.error(`[${sessionId}] Processing error:`, err);
+            sessions[sessionId].status = 'error';
+            sessions[sessionId].error = err.message;
+        });
+
+        return res.json({
+            session_id: sessionId,
+            message: 'Processing started (archive)',
+            total_images: 0
+        });
+    }
 
     // Recursively collect all image and archive files from inputPath
     function collectFilesRecursive(dir) {

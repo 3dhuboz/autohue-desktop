@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
+import { useWorker } from '../hooks/useWorker';
 import {
   FolderIcon,
   TrashIcon,
@@ -7,6 +8,7 @@ import {
   CloseIcon,
   AlertIcon,
   ImageIcon,
+  FlagIcon,
 } from '../components/Icons';
 
 // ─── Date grouping helpers ──────────────────────────────────────
@@ -70,6 +72,9 @@ function StatusBadgeIcon({ status }: { status: string }) {
 export default function HistoryPage() {
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const { workerUrl } = useWorker();
+  const [activeSession, setActiveSession] = useState<{ sid: string; status: string; processed: number; total: number; currentFile: string } | null>(null);
+  const activePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     window.electronAPI.getHistory()
@@ -77,6 +82,45 @@ export default function HistoryPage() {
       .catch(console.error)
       .finally(() => setLoading(false));
   }, []);
+
+  // Poll for active session from localStorage
+  useEffect(() => {
+    const checkActive = () => {
+      const saved = localStorage.getItem('autohue_active_session');
+      if (!saved || !workerUrl) { setActiveSession(null); return; }
+      const { sid } = JSON.parse(saved);
+      fetch(`${workerUrl}/status/${sid}`)
+        .then(r => r.ok ? r.json() : null)
+        .then(data => {
+          if (!data) { setActiveSession(null); return; }
+          if (data.status === 'processing' || data.status === 'paused') {
+            setActiveSession({ sid, status: data.status, processed: data.processed, total: data.total, currentFile: data.current_file || '' });
+          } else {
+            setActiveSession(null);
+            localStorage.removeItem('autohue_active_session');
+          }
+        })
+        .catch(() => setActiveSession(null));
+    };
+    checkActive();
+    activePollRef.current = setInterval(checkActive, 2000);
+    return () => { if (activePollRef.current) clearInterval(activePollRef.current); };
+  }, [workerUrl]);
+
+  const handlePauseResume = () => {
+    if (!activeSession || !workerUrl) return;
+    const action = activeSession.status === 'paused' ? 'resume' : 'pause';
+    fetch(`${workerUrl}/${action}/${activeSession.sid}`, { method: 'POST' });
+  };
+
+  const handleCancel = () => {
+    if (!activeSession || !workerUrl) return;
+    if (confirm('Cancel sorting? Already-sorted images will be kept.')) {
+      fetch(`${workerUrl}/cancel/${activeSession.sid}`, { method: 'POST' });
+      localStorage.removeItem('autohue_active_session');
+      setActiveSession(null);
+    }
+  };
 
   const handleDelete = async (id: number) => {
     await window.electronAPI.deleteHistory(id);
@@ -159,6 +203,53 @@ export default function HistoryPage() {
       <h1 className="text-2xl font-heading font-black mb-6">
         Processing <span className="text-racing-500">History</span>
       </h1>
+
+      {/* Active session banner */}
+      {activeSession && (
+        <div className="glass-card rounded-2xl p-4 mb-6 border border-racing-600/20 animate-fade-up">
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${activeSession.status === 'paused' ? 'bg-yellow-500/10' : 'bg-racing-600/10'}`}>
+                {activeSession.status === 'paused'
+                  ? <span className="w-3 h-3 rounded-sm bg-yellow-400" />
+                  : <SpinnerIcon size={18} className="text-racing-500" />
+                }
+              </div>
+              <div className="min-w-0">
+                <div className="text-sm font-heading font-bold flex items-center gap-2">
+                  {activeSession.status === 'paused' ? 'Sorting Paused' : 'Sorting in Progress'}
+                  <span className="text-xs text-white/30 font-normal">{activeSession.processed} / {activeSession.total}</span>
+                </div>
+                <p className="text-[11px] text-white/30 truncate">{activeSession.currentFile}</p>
+                <div className="h-1.5 bg-white/5 rounded-full overflow-hidden mt-1.5 max-w-xs">
+                  <div
+                    className="h-full bg-gradient-to-r from-racing-600 to-racing-500 rounded-full transition-all duration-500"
+                    style={{ width: `${activeSession.total > 0 ? Math.round((activeSession.processed / activeSession.total) * 100) : 0}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-2 shrink-0">
+              <button
+                onClick={handlePauseResume}
+                className={`px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors ${
+                  activeSession.status === 'paused'
+                    ? 'btn-racing'
+                    : 'btn-carbon border border-white/10'
+                }`}
+              >
+                {activeSession.status === 'paused' ? <><FlagIcon size={12} /> Resume</> : <><span className="w-2.5 h-2.5 rounded-sm bg-white/50" /> Pause</>}
+              </button>
+              <button
+                onClick={handleCancel}
+                className="px-3 py-2 rounded-lg text-xs text-white/30 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+              >
+                <CloseIcon size={12} />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="space-y-5">
         {groups.map(group => (
