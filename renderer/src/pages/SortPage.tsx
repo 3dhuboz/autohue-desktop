@@ -27,6 +27,13 @@ import {
 
 const MANUAL_SECONDS_PER_IMAGE = 20;
 
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
 const COLOR_INFO: Record<string, { label: string; swatch: string; glow: string }> = {
   'red':         { label: 'Red',         swatch: '#ef4444', glow: 'rgba(239,68,68,0.3)' },
   'blue':        { label: 'Blue',        swatch: '#3b82f6', glow: 'rgba(59,130,246,0.3)' },
@@ -67,6 +74,7 @@ export default function SortPage() {
   const [sessionId, setSessionId] = useState('');
   const [error, setError] = useState('');
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<{ percent: number; loaded: number; total: number; speed: number } | null>(null);
   const [expandedColor, setExpandedColor] = useState<string | null>(null);
   const [stats, setStats] = useState<ProcessingStats>({
     processed: 0, total: 0, currentFile: '', startTime: 0,
@@ -152,12 +160,31 @@ export default function SortPage() {
       } else {
         const formData = new FormData();
         files.forEach(f => formData.append('files', f));
-        const res = await fetch(`${workerUrl}/upload`, { method: 'POST', body: formData });
-        if (!res.ok) {
-          const errData = await res.json().catch(() => null);
-          throw new Error(errData?.error || 'Worker not available. Check Settings.');
-        }
-        data = await res.json();
+        setUploadProgress({ percent: 0, loaded: 0, total: 0, speed: 0 });
+        data = await new Promise((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          const uploadStart = Date.now();
+          xhr.open('POST', `${workerUrl}/upload`);
+          xhr.upload.onprogress = (e) => {
+            if (e.lengthComputable) {
+              const elapsed = (Date.now() - uploadStart) / 1000;
+              const speed = elapsed > 0 ? e.loaded / elapsed : 0;
+              setUploadProgress({ percent: Math.round((e.loaded / e.total) * 100), loaded: e.loaded, total: e.total, speed });
+            }
+          };
+          xhr.onload = () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+              try { resolve(JSON.parse(xhr.responseText)); }
+              catch { reject(new Error('Invalid response from worker')); }
+            } else {
+              try { const err = JSON.parse(xhr.responseText); reject(new Error(err.error || 'Upload failed')); }
+              catch { reject(new Error('Worker not available. Check Settings.')); }
+            }
+          };
+          xhr.onerror = () => reject(new Error('Upload failed — is the worker running?'));
+          xhr.send(formData);
+        });
+        setUploadProgress(null);
       }
 
       setSessionId(data.session_id);
@@ -176,6 +203,7 @@ export default function SortPage() {
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Processing failed.');
       setUploading(false);
+      setUploadProgress(null);
     }
   };
 
@@ -474,13 +502,29 @@ export default function SortPage() {
                     )}
                   </button>
                   {uploading && (
-                    <div className="flex items-center gap-3 text-xs text-white/30 animate-fade-up">
-                      <div className="flex gap-1">
-                        <div className="w-1.5 h-1.5 rounded-full bg-racing-500 animate-bounce" />
-                        <div className="w-1.5 h-1.5 rounded-full bg-racing-500 animate-bounce" style={{ animationDelay: '0.15s' }} />
-                        <div className="w-1.5 h-1.5 rounded-full bg-racing-500 animate-bounce" style={{ animationDelay: '0.3s' }} />
-                      </div>
-                      Uploading {files.length} files to the sorting engine...
+                    <div className="w-full max-w-md animate-fade-up">
+                      {uploadProgress ? (
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between text-xs text-white/40">
+                            <span>Uploading {files.length} file{files.length > 1 ? 's' : ''}...</span>
+                            <span className="font-mono text-racing-400">{uploadProgress.percent}%</span>
+                          </div>
+                          <div className="h-2 bg-white/5 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-gradient-to-r from-racing-600 to-racing-500 rounded-full transition-all duration-300"
+                              style={{ width: `${uploadProgress.percent}%` }}
+                            />
+                          </div>
+                          <div className="flex items-center justify-between text-[10px] text-white/20">
+                            <span>{formatBytes(uploadProgress.loaded)} / {formatBytes(uploadProgress.total)}</span>
+                            <span>{formatBytes(uploadProgress.speed)}/s</span>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-center gap-3 text-xs text-white/30">
+                          <SpinnerIcon size={14} /> Preparing upload...
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
