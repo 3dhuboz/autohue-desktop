@@ -102,7 +102,7 @@ export default function SortPage() {
         .then(r => r.ok ? r.json() : null)
         .then(data => {
           if (!data || !mountedRef.current) return;
-          if (data.status === 'processing' || data.status === 'paused') {
+          if (data.status === 'processing' || data.status === 'paused' || data.status === 'extracting') {
             setSessionId(sid);
             setPaused(data.status === 'paused');
             setStats(prev => ({ ...prev, total: data.total, processed: data.processed, startTime: startTime || Date.now(), currentFile: data.current_file || '' }));
@@ -303,10 +303,22 @@ export default function SortPage() {
           });
         }
 
-        if (data.status === 'paused') {
+        if (data.status === 'extracting') {
+          // Update extraction progress feedback
+          setStats(prev => ({
+            ...prev,
+            total: data.total || 0,
+            processed: data.processed || 0,
+            currentFile: data.current_file || 'Extracting archive...',
+          }));
+        } else if (data.status === 'paused') {
           setPaused(true);
         } else if (data.status === 'processing') {
           setPaused(false);
+          // Update total when transitioning from extracting to processing
+          if (data.total && data.total > 0) {
+            setStats(prev => ({ ...prev, total: data.total }));
+          }
         }
 
         if (data.status === 'completed' || data.status === 'cancelled') {
@@ -655,9 +667,22 @@ export default function SortPage() {
               <div className="flex items-center justify-between text-sm">
                 <span className="text-white/50 flex items-center gap-2">
                   <SpinnerIcon size={14} className="text-racing-500" />
-                  {stats.currentFile ? `Processing: ${stats.currentFile}` : 'Starting...'}
+                  {stats.total === 0 && stats.processed === 0 && stats.currentFile?.toLowerCase().includes('extract')
+                    ? <span className="text-amber-400">{stats.currentFile}</span>
+                    : stats.total === 0 && stats.processed === 0
+                    ? <span className="text-amber-400/80">
+                        Preparing — extracting archive and discovering images...
+                        <span className="inline-block ml-2 text-[10px] text-white/30 animate-pulse">This may take a moment for large files</span>
+                      </span>
+                    : stats.currentFile ? `Processing: ${stats.currentFile}` : 'Starting...'
+                  }
                 </span>
-                <span className="digital-readout text-white/60">{stats.processed} / {stats.total}</span>
+                <span className="digital-readout text-white/60">
+                  {stats.total === 0 && stats.processed === 0
+                    ? <span className="text-amber-400/60 text-xs animate-pulse">extracting...</span>
+                    : `${stats.processed} / ${stats.total}`
+                  }
+                </span>
               </div>
               <div className="w-full bg-white/5 rounded-full h-4 overflow-hidden relative">
                 <div

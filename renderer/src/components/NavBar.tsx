@@ -123,8 +123,8 @@ export default function NavBar({ page, setPage, license }: NavBarProps) {
           </div>
         </div>
 
-        {/* ── Right section: quota + badge ── */}
-        <div className="flex items-center gap-3 titlebar-no-drag">
+        {/* ── Right section: quota + badge (pr-32 = space for Windows window controls) ── */}
+        <div className="flex items-center gap-3 titlebar-no-drag pr-32">
           {/* Daily quota progress pill */}
           {hasQuota && (
             <div
