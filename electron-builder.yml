@@ -27,20 +27,17 @@ win:
     - target: nsis
       arch:
         - x64
-  icon: build/icon.ico
   artifactName: AutoHue-Setup-${version}.exe
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
-  installerIcon: build/icon.ico
 mac:
   target:
     - target: dmg
       arch:
         - x64
         - arm64
-  icon: build/icon.icns
   category: public.app-category.photography
 publish:
   provider: github
