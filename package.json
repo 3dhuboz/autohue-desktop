@@ -1,6 +1,6 @@
 {
   "name": "autohue-desktop",
-  "version": "1.2.5",
+  "version": "1.2.6",
   "description": "AutoHue — AI-powered car photo color sorter for motorsport photographers",
   "main": "electron/main.js",
   "private": true,
@@ -9,7 +9,7 @@
     "dev:renderer": "vite --config renderer/vite.config.ts",
     "dev:electron": "electron .",
     "build:renderer": "vite build --config renderer/vite.config.ts",
-    "build:worker": "esbuild worker/server.js --bundle --platform=node --target=node20 --outfile=worker/dist/server.js --external:onnxruntime-node --external:node-unrar-js --external:sql.js --external:@aws-sdk/*",
+    "build:worker": "node scripts/build-worker.js",
     "build": "npm run build:renderer && npm run build:worker && electron-builder",
     "pack": "npm run build:renderer && electron-builder --dir"
   },
@@ -45,8 +45,9 @@
     ],
     "extraResources": [
       {
-        "from": "worker/dist/server.js",
-        "to": "worker/server.js"
+        "from": "worker/dist",
+        "to": "worker",
+        "filter": ["**/*"]
       },
       {
         "from": "worker/models",

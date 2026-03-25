@@ -45,13 +45,12 @@ class WorkerManager {
     console.log(`[worker] Storage: ${this.storagePath}`);
 
     // In packaged builds, worker lives in resources/worker/ (outside app.asar)
-    // node_modules is inside app.asar, native modules in app.asar.unpacked
+    // Native modules are in resources/worker/node_modules/ (copied by build script)
     const { app } = require('electron');
     const extraEnv = {};
     if (app.isPackaged) {
-      const asarModules = path.join(process.resourcesPath, 'app.asar', 'node_modules');
-      const unpackedModules = path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules');
-      extraEnv.NODE_PATH = [asarModules, unpackedModules].join(path.delimiter);
+      const workerModules = path.join(process.resourcesPath, 'worker', 'node_modules');
+      extraEnv.NODE_PATH = workerModules;
     }
 
     this.process = fork(serverPath, [], {
