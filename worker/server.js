@@ -1327,9 +1327,8 @@ async function processSession(sessionId) {
     session.results = [];
     session.colorCounts = {};
 
-    // Phase 3: Process images in parallel batches for speed
-    const CONCURRENCY = Math.min(6, Math.max(2, require('os').cpus().length - 1));
-    console.log(`[${sessionId}] Processing ${files.length} images with concurrency=${CONCURRENCY}`);
+    // Phase 3: Process images sequentially (ONNX uses internal threading — JS parallelism causes contention)
+    console.log(`[${sessionId}] Processing ${files.length} images`);
     let completedCount = 0;
 
     // Wait while paused, abort if cancelled
@@ -1390,16 +1389,10 @@ async function processSession(sessionId) {
         }
     }
 
-    // Process in parallel with bounded concurrency
-    let cursor = 0;
-    async function runWorker() {
-        while (cursor < files.length) {
-            const idx = cursor++;
-            await processOneImage(files[idx], idx);
-        }
-    }
     try {
-        await Promise.all(Array.from({ length: CONCURRENCY }, () => runWorker()));
+        for (let i = 0; i < files.length; i++) {
+            await processOneImage(files[i], i);
+        }
         session.status = 'completed';
         session.currentFile = '';
         console.log(`[${sessionId}] Complete! ${files.length} images sorted.`);

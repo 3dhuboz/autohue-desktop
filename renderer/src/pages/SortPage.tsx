@@ -334,12 +334,15 @@ export default function SortPage() {
     } catch (e) { console.error('Reassign failed:', e); }
   };
 
-  const handleOpenOutput = () => {
-    window.electronAPI.openInExplorer(
-      `${window.electronAPI.getUserDataPath()}/worker-data/output/${sessionId}`
-    ).catch(() => {
+  const handleOpenOutput = async () => {
+    try {
+      const userDataPath = await window.electronAPI.getUserDataPath();
+      await window.electronAPI.openInExplorer(
+        `${userDataPath}/worker-data/output/${sessionId}`
+      );
+    } catch {
       window.open(`${workerUrl}/download/${sessionId}`, '_blank');
-    });
+    }
   };
 
   const progressPct = stats.total > 0 ? Math.round((stats.processed / stats.total) * 100) : 0;
