@@ -37,6 +37,22 @@ app.use(express.json());
 
 // ─── Claude Vision API (PRIMARY classifier for Pro/Unlimited tiers) ───
 let CLAUDE_API_KEY = process.env.CLAUDE_API_KEY || '';
+
+// Fallback: read from a keyfile dropped by the main process
+if (!CLAUDE_API_KEY) {
+    try {
+        const keyFile = path.join(STORAGE_ROOT, '.claude-key');
+        if (fs.existsSync(keyFile)) {
+            CLAUDE_API_KEY = fs.readFileSync(keyFile, 'utf8').trim();
+            if (CLAUDE_API_KEY) {
+                console.log('[config] Claude Vision key loaded from keyfile: ' + CLAUDE_API_KEY.slice(0, 15) + '...');
+            }
+        }
+    } catch (err) {
+        console.warn('[config] Keyfile read failed:', err.message);
+    }
+}
+
 if (CLAUDE_API_KEY) {
     console.log('[config] Claude Vision API key set — PRIMARY classifier enabled (3-5x faster, higher accuracy)');
 } else {

@@ -92,6 +92,17 @@ app.whenReady().then(async () => {
 
   // 4. Start the AI worker process
   const storagePath = path.join(app.getPath('userData'), 'worker-data');
+  const fs = require('fs');
+  fs.mkdirSync(storagePath, { recursive: true });
+  // Write keyfile so worker can read it directly (belt + suspenders + duct tape)
+  const keyFilePath = path.join(storagePath, '.claude-key');
+  if (claudeKey) {
+    fs.writeFileSync(keyFilePath, claudeKey, 'utf8');
+    console.log(`[main] Wrote Claude key to ${keyFilePath}`);
+  } else {
+    // Remove stale keyfile if no key
+    try { fs.unlinkSync(keyFilePath); } catch {}
+  }
   workerManager = new WorkerManager(storagePath);
   if (claudeKey) workerManager.setClaudeApiKey(claudeKey);
   workerManager.start().catch(err => {
@@ -209,14 +220,19 @@ ipcMain.handle('settings:getClaudeKey', () => {
 });
 
 ipcMain.handle('settings:setClaudeKey', (_, key) => {
-  // Custom key override — store in settings and pass to worker
+  // Custom key override — store in settings, keyfile, and pass to worker
+  const fs = require('fs');
+  const storagePath = path.join(app.getPath('userData'), 'worker-data');
+  const keyFilePath = path.join(storagePath, '.claude-key');
   if (key) {
     db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('claude_api_key', key);
+    fs.mkdirSync(storagePath, { recursive: true });
+    fs.writeFileSync(keyFilePath, key, 'utf8');
     if (workerManager) workerManager.setClaudeApiKey(key);
-    console.log('[main] Claude Vision key saved and sent to worker');
+    console.log('[main] Claude Vision key saved to DB + keyfile + sent to worker');
   } else {
     db.prepare('DELETE FROM settings WHERE key = ?').run('claude_api_key');
-    // Revert to platform key if available
+    try { fs.unlinkSync(keyFilePath); } catch {}
     const platformKey = licenseManager.getClaudeApiKey();
     if (workerManager && platformKey) workerManager.setClaudeApiKey(platformKey);
   }
