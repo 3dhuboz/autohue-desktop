@@ -44,13 +44,14 @@ class WorkerManager {
     console.log(`[worker] Server: ${serverPath}`);
     console.log(`[worker] Storage: ${this.storagePath}`);
 
-    // In packaged builds, worker lives in resources/ (outside app.asar)
-    // but node_modules is inside app.asar — set NODE_PATH so require() works.
+    // In packaged builds, worker lives in resources/worker/ (outside app.asar)
+    // node_modules is inside app.asar, native modules in app.asar.unpacked
     const { app } = require('electron');
     const extraEnv = {};
     if (app.isPackaged) {
       const asarModules = path.join(process.resourcesPath, 'app.asar', 'node_modules');
-      extraEnv.NODE_PATH = asarModules;
+      const unpackedModules = path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules');
+      extraEnv.NODE_PATH = [asarModules, unpackedModules].join(path.delimiter);
     }
 
     this.process = fork(serverPath, [], {

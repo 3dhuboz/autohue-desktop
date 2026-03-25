@@ -11,6 +11,16 @@ let workerManager;
 
 const isDev = !app.isPackaged;
 
+// Prevent EPIPE crashes from auto-updater pipe errors
+process.on('uncaughtException', (err) => {
+  if (err.code === 'EPIPE') return; // silently ignore broken pipe
+  console.error('[uncaught]', err);
+});
+process.on('unhandledRejection', (err) => {
+  if (err && err.code === 'EPIPE') return;
+  console.warn('[unhandled]', err);
+});
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1320,
