@@ -179,7 +179,12 @@ export default function SortPage() {
       // For archives (ZIP/RAR) or folders, use sort-local with the native file path
       // This avoids copying GBs of data through HTTP — the worker reads directly from disk
       const archiveFile = !folderPath && files.length === 1 && /\.(zip|rar)$/i.test(files[0].name) ? files[0] : null;
-      const localPath = folderPath || (archiveFile && (archiveFile as any).path) || null;
+      let localPath = folderPath;
+      if (!localPath && archiveFile) {
+        try {
+          localPath = (window as any).electronAPI?.getPathForFile?.(archiveFile) || (archiveFile as any).path || null;
+        } catch { localPath = null; }
+      }
 
       if (localPath) {
         const res = await fetch(`${workerUrl}/sort-local`, {

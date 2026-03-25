@@ -1,6 +1,9 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  // File path from drag-and-drop (Electron 28+ requires webUtils)
+  getPathForFile: (file) => webUtils.getPathForFile(file),
+
   // License
   getLicense: () => ipcRenderer.invoke('license:get'),
   activateLicense: (key) => ipcRenderer.invoke('license:activate', key),
