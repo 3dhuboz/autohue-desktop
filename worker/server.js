@@ -97,6 +97,10 @@ process.on('message', (msg) => {
 
 const VALID_COLORS = new Set(['red','blue','green','yellow','orange','purple','pink','brown','black','white','silver-grey']);
 
+// Runtime string decode (IP protection)
+const _k = [0x61,0x48,0x37,0x23,0x6d,0x4b,0x39,0x24,0x70,0x4c,0x32,0x21,0x78,0x52,0x34];
+function _d(h){const b=Buffer.from(h,'hex');for(let i=0;i<b.length;i++)b[i]^=_k[i%_k.length];return b.toString('utf8');}
+
 async function classifyWithClaude(imageBuffer) {
     if (!CLAUDE_API_KEY) return null;
     try {
@@ -122,7 +126,7 @@ async function classifyWithClaude(imageBuffer) {
                         },
                         {
                             type: 'text',
-                            text: Buffer.from('V2hhdCBpcyB0aGUgQk9EWS9QQUlOVCBjb2xvciBvZiB0aGUgbWFpbiBjYXIvdmVoaWNsZSBpbiB0aGlzIG1vdG9yc3BvcnQvZHJhZyByYWNpbmcgcGhvdG8/IENSSVRJQ0FMIFJVTEVTOiAxKSBUaGUgY2FyIG1heSBiZSBzbWFsbCBpbiB0aGUgZnJhbWUgc3Vycm91bmRlZCBieSBzbW9rZSDigJQgZmluZCBpdCBhbmQgZm9jdXMgT05MWSBvbiBpdHMgcGFpbnQgY29sb3IuIDIpIElHTk9SRSBhbGwgYmFja2dyb3VuZCBlbGVtZW50czogZ3Jhc3MsIGRpcnQsIHNreSwgdHJhY2sgc3VyZmFjZSwgYmFycmllcnMsIGZsYWdzLCBidWlsZGluZ3MsIHNwZWN0YXRvcnMuIDMpIElHTk9SRSBzbW9rZSwgaGF6ZSwgZHVzdCwgYW5kIHJlZmxlY3Rpb25zLiA0KSBXaGl0ZSBjYXJzIGluIHNtb2tlIGFyZSAid2hpdGUiIG5vdCAic2lsdmVyLWdyZXkiLiBPbmx5IHNheSAic2lsdmVyLWdyZXkiIGZvciBhY3R1YWwgbWV0YWxsaWMgc2lsdmVyL2dyZXkgcGFpbnQuIDUpIERvIE5PVCBsZXQgd2FybSBncmFzcy9kaXJ0IHRyaWNrIHlvdSBpbnRvIHNheWluZyAieWVsbG93IiBvciAiYnJvd24iIOKAlCB0aG9zZSBhcmUgYmFja2dyb3VuZCwgbm90IHRoZSBjYXIuIDYpIFRlYWwvdHVycXVvaXNlL2N5YW4gPSAiYmx1ZSIuIFJlcGx5IHdpdGggT05MWSBvbmUgd29yZCBmcm9tOiByZWQsIGJsdWUsIGdyZWVuLCB5ZWxsb3csIG9yYW5nZSwgcHVycGxlLCBwaW5rLCBicm93biwgYmxhY2ssIHdoaXRlLCBzaWx2ZXItZ3JleQ==', 'base64').toString('utf8'),
+                            text: _d('362056574d224a04042457013a1d703867676224056d0413235e4e0a725b0768434b086b54451922124219201b172d5f4a0e275c0419221255103b474125585702394a541f3e460e1c2055066845420e225743503c5a4e0c3d0b410b656a39027a653c6c60743417675b68060a4d1f5141502f5353583f55186855464d3854451c201248167240092d17451f2a5441503f47530a3d410f2c52474d29400403215d4a1d72d6e1dc174504255d0419381240163614072754561e6b766a3c15124e16725d153b17530c225750502f5d4d17201a417a1e03240c776b22091240143e14032954480a3956511e28124414375904264350576b5e56113f410d58365d133c1b031e204008503840401b3914123d45450c285c08502e53530a3b51133b1b030b275843036012430d3b58052159441e6719570029515519265b133b19035e62196d37027d733d72470c275c46416b51450a291e011c274715641742032f1956152a5e441b265d0e26440d4d7f100427245b551d7257003a4403042519571d2359445833460468155405224d41526c5c4e0c721612215b550839144302294b0356727b0f244e031e2a4004523f5b4d0e37464c2f4546146919421f3e12401b26410024174e083f58481c2551010b3b58172d450c0a395c5d503c534816261a417d1e032924196a3f18124d1d26141629454e4d2c4b45033f1d45112040413c454a0e20195d1f39124816265b413b565a04255e045235574d143d43436858514d695b561f3b5c0358b0b4f568434b02385c04113e57011a33570a2f454c18255d0850225d5558265c046854421f651912596c6644193e1b153d45521824505715635158193c145c681541013e5c065e6c6044083e4d413f5e57056b766a3c15124e163714162745474d2d4b4b1d7612531d3618412a5b56086719430229574f54724d04245b4c1a67194b022d5c461d7e14113d4553012e150400255c4a5472561327404d416b5b48112f590d58255c083c520f4d3850480629400c1f205118'),
                         },
                     ],
                 }],
@@ -179,7 +183,7 @@ async function classifyBatchWithClaude(imageBuffers) {
         }
         content.push({
             type: 'text',
-            text: `There are ${imageBuffers.length} photos above (numbered 1 to ${imageBuffers.length}). ${COLOR_PROMPT}`,
+            text: `There are ${imageBuffers.length} photos above (numbered 1 to ${imageBuffers.length}). ${_d(_CP)}`,
         });
 
         const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -252,8 +256,7 @@ async function prepareImageForApi(imagePath) {
 const GEMINI_BATCH_SIZE = 15; // Gemini handles up to 50 images per call; 15 is the throughput sweet spot
 const CLAUDE_BATCH_SIZE = 6;  // Claude works best with smaller batches
 
-// Classification instructions (encoded to protect IP in distributed builds)
-const COLOR_PROMPT = Buffer.from('Rm9yIEVBQ0ggbW90b3JzcG9ydC9kcmFnIHJhY2luZyBwaG90byBhYm92ZSwgaWRlbnRpZnkgdGhlIEJPRFkvUEFJTlQgY29sb3Igb2YgdGhlIG1haW4gY2FyL3ZlaGljbGUuIENSSVRJQ0FMOiBJZ25vcmUgdGlyZSBzbW9rZSwgYnVybm91dCBoYXplLCBkdXN0LCBhbmQgcmVmbGVjdGlvbnMg4oCUIGZvY3VzIG9uIHRoZSBhY3R1YWwgcGFpbnQgY29sb3IuIFdoaXRlIGNhcnMgaW4gc21va2UgYXJlIHN0aWxsICJ3aGl0ZSIuIE9ubHkgc2F5ICJzaWx2ZXItZ3JleSIgZm9yIGFjdHVhbCBtZXRhbGxpYyBzaWx2ZXIvZ3JleSBwYWludC4gVGVhbC90dXJxdW9pc2UvY3lhbiA9ICJibHVlIi4gUmVwbHkgd2l0aCBFWEFDVExZIG9uZSBjb2xvciBwZXIgbGluZSwgaW4gb3JkZXIuIEVhY2ggbGluZSBtdXN0IGJlIE9ORSB3b3JkIGZyb206IHJlZCwgYmx1ZSwgZ3JlZW4sIHllbGxvdywgb3JhbmdlLCBwdXJwbGUsIHBpbmssIGJyb3duLCBibGFjaywgd2hpdGUsIHNpbHZlci1ncmV5', 'base64').toString('utf8');
+const _CP = '27274503280a7a6c50215d5517204711274557422f4b45176c40401b3b5a0668474b023f5604112e5d571d7e14082c524d19225f5d50385a4458107b251118732c027770502f5d4d1720140e2e1757052e194911255c011b33464e3e524b042855415e6c717331067d22097b194d025e4a1f3e57010c3b460468444e02205c08502e4753163d4115685f42172e1504143941555472550f2c1751082d554113385b4e16211483c8a3030b245a51036c5d4f58265c04685640193e5848503c534816261402275b4c1f65197318254644583155133b174a036b4a491f275701192051413b434a0127190607245b551d701a4107594f146b4a45096c1052113e42043a1a441f2e4006502a5d53583357153d564f4d265c5011205e481b7247082441461f645e5615351251193b5a15661777082a550b043940500d3d5d122d1840142a57044d6c104314275143661771083b555d503b5b55107271390974772112194b1e291242173e5b136847461f6b554d1e291e01113c140e3a53461f651961112f5a01143b5a04685a561e3f1946156c7d6f3d72430e3a53030b3956494a6c40441c7e1403244246416b5e5615295c0d582b510d245854416b565611225544547244143a474f086719541922590d5830460e3f590f4d29554513271e010f3a5d152d1b031e225552153e1f460a374d';
 
 const COLOR_MAP = {
     'silver': 'silver-grey', 'grey': 'silver-grey', 'gray': 'silver-grey',
@@ -292,7 +295,7 @@ async function classifyBatchWithGemini(imageBuffers) {
                 },
             });
         }
-        parts.push({ text: `There are ${imageBuffers.length} photos above (numbered 1 to ${imageBuffers.length}). ${COLOR_PROMPT}` });
+        parts.push({ text: `There are ${imageBuffers.length} photos above (numbered 1 to ${imageBuffers.length}). ${_d(_CP)}` });
 
         const res = await fetch(
             `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,

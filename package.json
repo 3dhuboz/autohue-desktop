@@ -1,6 +1,6 @@
 {
   "name": "autohue-desktop",
-  "version": "1.6.1",
+  "version": "1.6.2",
   "description": "AutoHue — AI-powered car photo color sorter for motorsport photographers",
   "main": "electron/main.js",
   "private": true,
@@ -10,7 +10,8 @@
     "dev:electron": "electron .",
     "build:renderer": "vite build --config renderer/vite.config.ts",
     "build:worker": "node scripts/build-worker.js",
-    "build": "npm run build:renderer && npm run build:worker && electron-builder",
+    "build:obfuscate": "node scripts/obfuscate-electron.js",
+    "build": "npm run build:renderer && npm run build:worker && npm run build:obfuscate && electron-builder",
     "pack": "npm run build:renderer && electron-builder --dir"
   },
   "dependencies": {
@@ -47,12 +48,16 @@
       {
         "from": "worker/dist",
         "to": "worker",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       },
       {
         "from": "worker/models",
         "to": "worker/models",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "win": {
@@ -85,6 +90,7 @@
     "electron": "^33.3.0",
     "electron-builder": "^25.1.0",
     "esbuild": "^0.27.4",
+    "javascript-obfuscator": "^5.4.1",
     "postcss": "^8.4.49",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
