@@ -82,19 +82,17 @@ export default function SettingsPage({ license, onRefresh }: Props) {
   const [customKey, setCustomKey] = useState('');
   const [showKeyInput, setShowKeyInput] = useState(false);
   const [keySaving, setKeySaving] = useState(false);
-  const [geminiKey, setGeminiKey] = useState('');
-  const [geminiStatus, setGeminiStatus] = useState<{ hasKey: boolean } | null>(null);
-  const [showGeminiInput, setShowGeminiInput] = useState(false);
-  const [geminiSaving, setGeminiSaving] = useState(false);
-  const [visionEngine, setVisionEngine] = useState('auto');
+  const [orKey, setOrKey] = useState('');
+  const [orStatus, setOrStatus] = useState<{ hasKey: boolean } | null>(null);
+  const [showOrInput, setShowOrInput] = useState(false);
+  const [orSaving, setOrSaving] = useState(false);
 
   useEffect(() => {
     window.electronAPI.getVersion().then(setVersion);
     window.electronAPI.getUserDataPath().then(setUserDataPath);
     window.electronAPI.getSetting('output_folder').then(v => setOutputFolder(v || ''));
     window.electronAPI.getClaudeKeyStatus().then(setClaudeStatus);
-    window.electronAPI.getGeminiKeyStatus().then(setGeminiStatus);
-    window.electronAPI.getVisionEngine().then(setVisionEngine);
+    window.electronAPI.getOpenRouterKeyStatus().then(setOrStatus);
   }, []);
 
   const handleSelectOutput = async () => {
@@ -285,101 +283,73 @@ export default function SettingsPage({ license, onRefresh }: Props) {
               <span className="text-[11px] text-white/40 capitalize">{health.segformer || 'Loading\u2026'}</span>
             </div>
 
-            {/* ─── Vision Engine Selector ─── */}
+            {/* ─── OpenRouter API Key (primary) ─── */}
             <div className="h-px bg-white/[0.04]" />
 
             <div className="py-2 px-1 space-y-3">
-              <div>
-                <span className="text-[10px] text-white/30 uppercase tracking-wider block mb-2">Vision Engine</span>
-                <div className="grid grid-cols-3 gap-2">
-                  {[
-                    { id: 'auto', label: 'Auto', desc: 'Best available' },
-                    { id: 'gemini', label: 'Gemini Flash', desc: 'Fastest' },
-                    { id: 'claude', label: 'Claude', desc: 'High accuracy' },
-                  ].map(opt => (
-                    <button
-                      key={opt.id}
-                      onClick={async () => {
-                        setVisionEngine(opt.id);
-                        await window.electronAPI.setVisionEngine(opt.id);
-                      }}
-                      className={`p-2.5 rounded-lg border text-center transition-all ${
-                        visionEngine === opt.id
-                          ? 'border-racing-500/50 bg-racing-500/10 text-racing-400'
-                          : 'border-white/[0.06] bg-white/[0.02] text-white/40 hover:border-white/10'
-                      }`}
-                    >
-                      <span className="text-xs font-heading font-bold block">{opt.label}</span>
-                      <span className="text-[9px] opacity-60">{opt.desc}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Gemini API Key */}
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2.5">
                   <StatusDot
-                    color={geminiStatus?.hasKey ? 'green' : 'yellow'}
-                    pulse={!!geminiStatus?.hasKey}
+                    color={orStatus?.hasKey ? 'green' : 'yellow'}
+                    pulse={!!orStatus?.hasKey}
                   />
                   <div>
-                    <span className="text-xs text-white/70 font-heading font-bold block">Gemini 2.5 Flash</span>
+                    <span className="text-xs text-white/70 font-heading font-bold block">OpenRouter</span>
                     <span className="text-[10px] text-white/30">
-                      {geminiStatus?.hasKey ? 'Active — high-speed classifier' : 'Add key for fastest processing'}
+                      {orStatus?.hasKey ? 'Active — Gemini Flash via OpenRouter' : 'Add key for high-speed AI classification'}
                     </span>
                   </div>
                 </div>
                 <button
-                  onClick={() => setShowGeminiInput(!showGeminiInput)}
+                  onClick={() => setShowOrInput(!showOrInput)}
                   className="text-[11px] text-racing-400 hover:text-racing-300 transition-colors"
                 >
-                  {showGeminiInput ? 'Hide' : geminiStatus?.hasKey ? 'Change key' : 'Configure'}
+                  {showOrInput ? 'Hide' : orStatus?.hasKey ? 'Change key' : 'Configure'}
                 </button>
               </div>
 
-              {showGeminiInput && (
+              {showOrInput && (
                 <div className="space-y-2">
                   <div className="flex gap-2">
                     <input
                       type="password"
-                      placeholder="AIza... (Google AI Studio key)"
-                      value={geminiKey}
-                      onChange={e => setGeminiKey(e.target.value)}
+                      placeholder="sk-or-... (OpenRouter API key)"
+                      value={orKey}
+                      onChange={e => setOrKey(e.target.value)}
                       className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs text-white/60 font-mono placeholder:text-white/20 focus:outline-none focus:border-racing-500/50"
                     />
                     <button
                       onClick={async () => {
-                        setGeminiSaving(true);
-                        await window.electronAPI.setGeminiKey(geminiKey);
-                        const status = await window.electronAPI.getGeminiKeyStatus();
-                        setGeminiStatus(status);
-                        setGeminiSaving(false);
-                        setShowGeminiInput(false);
-                        setGeminiKey('');
+                        setOrSaving(true);
+                        await window.electronAPI.setOpenRouterKey(orKey);
+                        const status = await window.electronAPI.getOpenRouterKeyStatus();
+                        setOrStatus(status);
+                        setOrSaving(false);
+                        setShowOrInput(false);
+                        setOrKey('');
                       }}
-                      disabled={geminiSaving}
+                      disabled={orSaving}
                       className="btn-racing px-4 py-2 rounded-lg text-xs shrink-0"
                     >
-                      {geminiSaving ? 'Saving...' : 'Save'}
+                      {orSaving ? 'Saving...' : 'Save'}
                     </button>
                   </div>
-                  {geminiStatus?.hasKey && (
+                  {orStatus?.hasKey && (
                     <button
                       onClick={async () => {
-                        await window.electronAPI.setGeminiKey('');
-                        const status = await window.electronAPI.getGeminiKeyStatus();
-                        setGeminiStatus(status);
+                        await window.electronAPI.setOpenRouterKey('');
+                        const status = await window.electronAPI.getOpenRouterKeyStatus();
+                        setOrStatus(status);
                       }}
                       className="text-[10px] text-white/30 hover:text-red-400 transition-colors"
                     >
-                      Remove Gemini key
+                      Remove OpenRouter key
                     </button>
                   )}
                 </div>
               )}
 
-              {/* Claude API Key (secondary) */}
+              {/* Claude API Key (fallback) */}
               <div className="h-px bg-white/[0.04]" />
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2.5">
@@ -390,64 +360,11 @@ export default function SettingsPage({ license, onRefresh }: Props) {
                   <div>
                     <span className="text-xs text-white/70 font-heading font-bold block">Claude Vision</span>
                     <span className="text-[10px] text-white/30">
-                      {claudeStatus?.hasKey
-                        ? 'Active — fallback classifier'
-                        : claudeStatus?.eligible
-                        ? 'Available — configure as backup'
-                        : 'Pro or Unlimited plan required'}
+                      {claudeStatus?.hasKey ? 'Active — fallback' : 'Platform key (auto-configured)'}
                     </span>
                   </div>
                 </div>
-                {claudeStatus?.eligible && (
-                  <button
-                    onClick={() => setShowKeyInput(!showKeyInput)}
-                    className="text-[11px] text-racing-400 hover:text-racing-300 transition-colors"
-                  >
-                    {showKeyInput ? 'Hide' : claudeStatus.hasKey ? 'Change key' : 'Configure'}
-                  </button>
-                )}
               </div>
-
-              {showKeyInput && claudeStatus?.eligible && (
-                <div className="space-y-2">
-                  <div className="flex gap-2">
-                    <input
-                      type="password"
-                      placeholder="sk-ant-... (optional — platform key is used by default)"
-                      value={customKey}
-                      onChange={e => setCustomKey(e.target.value)}
-                      className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs text-white/60 font-mono placeholder:text-white/20 focus:outline-none focus:border-racing-500/50"
-                    />
-                    <button
-                      onClick={async () => {
-                        setKeySaving(true);
-                        await window.electronAPI.setClaudeKey(customKey);
-                        const status = await window.electronAPI.getClaudeKeyStatus();
-                        setClaudeStatus(status);
-                        setKeySaving(false);
-                        setShowKeyInput(false);
-                        setCustomKey('');
-                      }}
-                      disabled={keySaving}
-                      className="btn-racing px-4 py-2 rounded-lg text-xs shrink-0"
-                    >
-                      {keySaving ? 'Saving...' : 'Save'}
-                    </button>
-                  </div>
-                  {claudeStatus.source === 'custom' && (
-                    <button
-                      onClick={async () => {
-                        await window.electronAPI.setClaudeKey('');
-                        const status = await window.electronAPI.getClaudeKeyStatus();
-                        setClaudeStatus(status);
-                      }}
-                      className="text-[10px] text-white/30 hover:text-red-400 transition-colors"
-                    >
-                      Remove custom key (revert to platform key)
-                    </button>
-                  )}
-                </div>
-              )}
             </div>
           </div>
         )}

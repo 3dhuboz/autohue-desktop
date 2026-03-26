@@ -37,61 +37,50 @@ app.use(express.json());
 // Fallback: multi-region sampling + HSV env filtering if SegFormer unavailable
 // ═══════════════════════════════════════════════════════════════════════════
 
-// ─── Vision API keys ───
-let CLAUDE_API_KEY = process.env.CLAUDE_API_KEY || '';
-let GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
-let VISION_ENGINE = process.env.VISION_ENGINE || 'auto'; // 'gemini' | 'claude' | 'local' | 'auto'
+// ─── Vision API (OpenRouter — single key for all models) ───
+let OPENROUTER_KEY = process.env.OPENROUTER_KEY || '';
+let VISION_MODEL = process.env.VISION_MODEL || 'google/gemini-2.5-flash';
 
-// Fallback: read from keyfiles dropped by the main process
+// Fallback: read from keyfile
+if (!OPENROUTER_KEY) {
+    try {
+        const keyFile = path.join(STORAGE_ROOT, '.openrouter-key');
+        if (fs.existsSync(keyFile)) {
+            OPENROUTER_KEY = fs.readFileSync(keyFile, 'utf8').trim();
+        }
+    } catch (err) { /* ignore */ }
+}
+
+// Legacy: also check claude/gemini keyfiles for backward compat
+let CLAUDE_API_KEY = process.env.CLAUDE_API_KEY || '';
 if (!CLAUDE_API_KEY) {
     try {
         const keyFile = path.join(STORAGE_ROOT, '.claude-key');
-        if (fs.existsSync(keyFile)) {
-            CLAUDE_API_KEY = fs.readFileSync(keyFile, 'utf8').trim();
-            if (CLAUDE_API_KEY) console.log('[config] Claude key loaded from keyfile');
-        }
-    } catch (err) { console.warn('[config] Claude keyfile read failed:', err.message); }
-}
-if (!GEMINI_API_KEY) {
-    try {
-        const keyFile = path.join(STORAGE_ROOT, '.gemini-key');
-        if (fs.existsSync(keyFile)) {
-            GEMINI_API_KEY = fs.readFileSync(keyFile, 'utf8').trim();
-            if (GEMINI_API_KEY) console.log('[config] Gemini key loaded from keyfile');
-        }
-    } catch (err) { console.warn('[config] Gemini keyfile read failed:', err.message); }
+        if (fs.existsSync(keyFile)) CLAUDE_API_KEY = fs.readFileSync(keyFile, 'utf8').trim();
+    } catch { /* ignore */ }
 }
 
-// Determine active engine
 function getActiveEngine() {
-    if (VISION_ENGINE === 'gemini' && GEMINI_API_KEY) return 'gemini';
-    if (VISION_ENGINE === 'claude' && CLAUDE_API_KEY) return 'claude';
-    if (VISION_ENGINE === 'local') return 'local';
-    // Auto: prefer Gemini (fastest), then Claude, then local
-    if (GEMINI_API_KEY) return 'gemini';
+    if (OPENROUTER_KEY) return 'openrouter';
     if (CLAUDE_API_KEY) return 'claude';
     return 'local';
 }
 
-console.log(`[config] Vision engine: ${VISION_ENGINE} → active: ${getActiveEngine()}`);
-if (GEMINI_API_KEY) console.log('[config] Gemini 2.5 Flash key set — HIGH-SPEED classifier enabled');
-if (CLAUDE_API_KEY) console.log('[config] Claude Vision key set — available as fallback');
-if (!GEMINI_API_KEY && !CLAUDE_API_KEY) console.log('[config] No API keys — using local LAB classifier');
+console.log(`[config] Engine: ${getActiveEngine()}${OPENROUTER_KEY ? ' (model: ' + VISION_MODEL + ')' : ''}`);
 
-// Listen for runtime key/engine updates from main process
+// Listen for runtime updates from main process
 process.on('message', (msg) => {
     if (!msg) return;
+    if (msg.type === 'set-openrouter-key' && msg.key) {
+        OPENROUTER_KEY = msg.key;
+        console.log('[config] OpenRouter key updated');
+    }
+    if (msg.type === 'set-vision-model' && msg.model) {
+        VISION_MODEL = msg.model;
+        console.log('[config] Vision model: ' + msg.model);
+    }
     if (msg.type === 'set-claude-key' && msg.key) {
         CLAUDE_API_KEY = msg.key;
-        console.log('[config] Claude Vision API key updated at runtime');
-    }
-    if (msg.type === 'set-gemini-key' && msg.key) {
-        GEMINI_API_KEY = msg.key;
-        console.log('[config] Gemini API key updated at runtime');
-    }
-    if (msg.type === 'set-vision-engine' && msg.engine) {
-        VISION_ENGINE = msg.engine;
-        console.log(`[config] Vision engine changed to: ${msg.engine} → active: ${getActiveEngine()}`);
     }
 });
 
@@ -282,72 +271,75 @@ function parseColorLines(rawText, expectedCount) {
     return results;
 }
 
-async function classifyBatchWithGemini(imageBuffers) {
-    if (!GEMINI_API_KEY || imageBuffers.length === 0) return null;
+// ─── OpenRouter batch classifier (OpenAI-compatible, any model) ───
+const OPENROUTER_BATCH_SIZE = 15;
+
+async function classifyBatchWithOpenRouter(imageBuffers) {
+    if (!OPENROUTER_KEY || imageBuffers.length === 0) return null;
     try {
-        // Build Gemini parts: images + text prompt
-        const parts = [];
+        // Build OpenAI-compatible content array: images + text
+        const content = [];
         for (const buf of imageBuffers) {
-            parts.push({
-                inline_data: {
-                    mime_type: 'image/jpeg',
-                    data: buf.toString('base64'),
-                },
+            content.push({
+                type: 'image_url',
+                image_url: { url: `data:image/jpeg;base64,${buf.toString('base64')}` },
             });
         }
-        parts.push({ text: `There are ${imageBuffers.length} photos above (numbered 1 to ${imageBuffers.length}). ${_d(_CP)}` });
+        content.push({
+            type: 'text',
+            text: `There are ${imageBuffers.length} photos above (numbered 1 to ${imageBuffers.length}). ${_d(_CP)}`,
+        });
 
-        const res = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
-            {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    contents: [{ parts }],
-                    generationConfig: {
-                        maxOutputTokens: 200,
-                        temperature: 0,
-                        thinkingConfig: { thinkingBudget: 0 },
-                    },
-                }),
-                signal: AbortSignal.timeout(20000),
-            }
-        );
+        const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${OPENROUTER_KEY}`,
+                'HTTP-Referer': 'https://autohue.app',
+                'X-Title': 'AutoHue',
+            },
+            body: JSON.stringify({
+                model: VISION_MODEL,
+                max_tokens: 200,
+                temperature: 0,
+                messages: [{ role: 'user', content }],
+            }),
+            signal: AbortSignal.timeout(25000),
+        });
 
         if (!res.ok) {
             const errText = await res.text();
-            console.error(`[gemini-batch] API error ${res.status}: ${errText.slice(0, 200)}`);
+            console.error(`[openrouter] API error ${res.status}: ${errText.slice(0, 200)}`);
             return null;
         }
 
         const data = await res.json();
-        const rawText = (data.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
+        const rawText = (data.choices?.[0]?.message?.content || '').trim();
         const results = parseColorLines(rawText, imageBuffers.length);
-        const method = 'gemini-flash-batch';
-        results.forEach(r => { if (r) r.method = method; });
+        results.forEach(r => { if (r) r.method = 'openrouter-batch'; });
 
         const validCount = results.filter(r => r !== null).length;
-        console.log(`  [gemini-batch] ${validCount}/${imageBuffers.length} classified: ${results.map(r => r?.category || '?').join(', ')}`);
+        console.log(`  [openrouter] ${validCount}/${imageBuffers.length}: ${results.map(r => r?.category || '?').join(', ')}`);
         return results;
     } catch (err) {
-        console.error(`[gemini-batch] Failed: ${err.message}`);
+        console.error(`[openrouter] Failed: ${err.message}`);
         return null;
     }
 }
 
-// ─── Unified batch dispatch: routes to active engine ───
+// ─── Unified batch dispatch ───
 function getVisionBatchSize() {
     const engine = getActiveEngine();
-    if (engine === 'gemini') return GEMINI_BATCH_SIZE;
+    if (engine === 'openrouter') return OPENROUTER_BATCH_SIZE;
     if (engine === 'claude') return CLAUDE_BATCH_SIZE;
-    return 1; // local processes one at a time
+    return 1;
 }
 
 async function classifyBatchVision(imageBuffers) {
     const engine = getActiveEngine();
-    if (engine === 'gemini') return classifyBatchWithGemini(imageBuffers);
+    if (engine === 'openrouter') return classifyBatchWithOpenRouter(imageBuffers);
     if (engine === 'claude') return classifyBatchWithClaude(imageBuffers);
-    return null; // local fallback handled by caller
+    return null;
 }
 
 // ─── Nyckel API configuration (from environment variables) ───
@@ -2480,12 +2472,12 @@ app.get('/health', (req, res) => {
         segModelPath: SEGFORMER_MODEL_PATH,
         segModelExists: fs.existsSync(SEGFORMER_MODEL_PATH),
         visionEngine: getActiveEngine(),
-        visionEngineConfig: VISION_ENGINE,
-        geminiKey: GEMINI_API_KEY ? 'set' : 'not set',
+        visionModel: VISION_MODEL,
+        openrouterKey: OPENROUTER_KEY ? 'set' : 'not set',
         claudeKey: CLAUDE_API_KEY ? 'set' : 'not set',
         batchSize: getVisionBatchSize(),
-        pipeline: getActiveEngine() === 'gemini'
-            ? 'Gemini 2.5 Flash (PRIMARY) → local LAB (fallback)'
+        pipeline: getActiveEngine() === 'openrouter'
+            ? `OpenRouter/${VISION_MODEL} (PRIMARY) → local LAB (fallback)`
             : getActiveEngine() === 'claude'
             ? 'Claude Vision (PRIMARY) → local LAB (fallback)'
             : segformerSession

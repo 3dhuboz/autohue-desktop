@@ -9,8 +9,8 @@ class WorkerManager {
     this.storagePath = storagePath;
     this.restarting = false;
     this.claudeApiKey = null;
-    this.geminiApiKey = null;
-    this.visionEngine = 'auto';
+    this.openRouterKey = null;
+    this.visionModel = 'google/gemini-2.5-flash';
 
     // Ensure storage directories exist
     fs.mkdirSync(storagePath, { recursive: true });
@@ -25,21 +25,20 @@ class WorkerManager {
     }
   }
 
-  /** Set the Gemini API key for Vision classification. */
-  setGeminiApiKey(key) {
-    this.geminiApiKey = key;
+  /** Set the OpenRouter API key. */
+  setOpenRouterKey(key) {
+    this.openRouterKey = key;
     if (this.process && key) {
-      this.process.send({ type: 'set-gemini-key', key });
-      console.log('[worker] Sent Gemini API key to running worker');
+      this.process.send({ type: 'set-openrouter-key', key });
+      console.log('[worker] Sent OpenRouter key to running worker');
     }
   }
 
-  /** Set the vision engine preference. */
-  setVisionEngine(engine) {
-    this.visionEngine = engine;
+  /** Set the vision model (e.g. google/gemini-2.5-flash). */
+  setVisionModel(model) {
+    this.visionModel = model;
     if (this.process) {
-      this.process.send({ type: 'set-vision-engine', engine });
-      console.log(`[worker] Set vision engine to: ${engine}`);
+      this.process.send({ type: 'set-vision-model', model });
     }
   }
 
@@ -102,15 +101,15 @@ class WorkerManager {
       console.log(`[worker] Passing CLAUDE_API_KEY to worker env: ${claudeKey.slice(0, 12)}...`);
     }
 
-    const geminiKey = this.geminiApiKey;
+    const orKey = this.openRouterKey;
     this.process = fork(serverPath, [], {
       env: {
         ...process.env,
         PORT: String(this.port),
         STORAGE_ROOT: this.storagePath,
         ...(claudeKey ? { CLAUDE_API_KEY: claudeKey } : {}),
-        ...(geminiKey ? { GEMINI_API_KEY: geminiKey } : {}),
-        VISION_ENGINE: this.visionEngine || 'auto',
+        ...(orKey ? { OPENROUTER_KEY: orKey } : {}),
+        VISION_MODEL: this.visionModel || 'google/gemini-2.5-flash',
       },
       silent: true, // capture stdout/stderr
     });

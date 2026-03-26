@@ -102,15 +102,15 @@ app.whenReady().then(async () => {
     }
   }
 
-  // 3. Get API keys — Claude + Gemini
+  // 3. Get API keys — OpenRouter + Claude
   const customKeyRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('claude_api_key');
   const claudeKey = (customKeyRow ? customKeyRow.value : null) || licenseManager.getClaudeApiKey();
-  const geminiKeyRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('gemini_api_key');
-  const geminiKey = geminiKeyRow ? geminiKeyRow.value : null;
-  const engineRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('vision_engine');
-  const visionEngine = engineRow ? engineRow.value : 'auto';
-  if (geminiKey) console.log('[main] Gemini API key available — high-speed classifier enabled');
-  if (claudeKey) console.log(`[main] Claude Vision API key available (${customKeyRow ? 'custom' : 'platform'})`);
+  const orKeyRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('openrouter_api_key');
+  const openRouterKey = orKeyRow ? orKeyRow.value : null;
+  const modelRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('vision_model');
+  const visionModel = modelRow ? modelRow.value : 'google/gemini-2.5-flash';
+  if (openRouterKey) console.log('[main] OpenRouter key available — high-speed classifier enabled');
+  if (claudeKey) console.log(`[main] Claude Vision key available (${customKeyRow ? 'custom' : 'platform'})`);
 
   // 4. Start the AI worker process
   const storagePath = path.join(app.getPath('userData'), 'worker-data');
@@ -118,14 +118,14 @@ app.whenReady().then(async () => {
   fs.mkdirSync(storagePath, { recursive: true });
   // Write keyfiles so worker can read them directly
   const claudeKeyPath = path.join(storagePath, '.claude-key');
-  const geminiKeyPath = path.join(storagePath, '.gemini-key');
+  const orKeyPath = path.join(storagePath, '.openrouter-key');
   if (claudeKey) { fs.writeFileSync(claudeKeyPath, claudeKey, 'utf8'); } else { try { fs.unlinkSync(claudeKeyPath); } catch {} }
-  if (geminiKey) { fs.writeFileSync(geminiKeyPath, geminiKey, 'utf8'); } else { try { fs.unlinkSync(geminiKeyPath); } catch {} }
+  if (openRouterKey) { fs.writeFileSync(orKeyPath, openRouterKey, 'utf8'); } else { try { fs.unlinkSync(orKeyPath); } catch {} }
 
   workerManager = new WorkerManager(storagePath);
   if (claudeKey) workerManager.setClaudeApiKey(claudeKey);
-  if (geminiKey) workerManager.setGeminiApiKey(geminiKey);
-  workerManager.visionEngine = visionEngine;
+  if (openRouterKey) workerManager.setOpenRouterKey(openRouterKey);
+  workerManager.visionModel = visionModel;
   workerManager.start().catch(err => {
     console.error('Worker failed to start:', err.message);
   });
@@ -264,16 +264,13 @@ ipcMain.handle('settings:getClaudeKey', () => {
 
   const license = licenseManager.getCurrent();
   const tier = (license.tier || '').toLowerCase();
-  const geminiRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('gemini_api_key');
-  const hasGemini = !!(geminiRow && geminiRow.value);
-  const engineRow2 = db.prepare('SELECT value FROM settings WHERE key = ?').get('vision_engine');
+  const orRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('openrouter_api_key');
   return {
     hasKey: !!activeKey,
-    hasGeminiKey: hasGemini,
+    hasOpenRouterKey: !!(orRow && orRow.value),
     source: customKey ? 'custom' : platformKey ? 'platform' : 'none',
     eligible: ['pro', 'unlimited'].includes(tier) || license.isUnlimited === true || license.active,
     tier,
-    visionEngine: engineRow2 ? engineRow2.value : 'auto',
   };
 });
 
@@ -297,40 +294,26 @@ ipcMain.handle('settings:setClaudeKey', (_, key) => {
   return true;
 });
 
-// ─── Gemini API Key ───
-ipcMain.handle('settings:setGeminiKey', (_, key) => {
+// ─── OpenRouter API Key ───
+ipcMain.handle('settings:setOpenRouterKey', (_, key) => {
   const fs = require('fs');
   const storagePath = path.join(app.getPath('userData'), 'worker-data');
-  const keyFilePath = path.join(storagePath, '.gemini-key');
+  const keyFilePath = path.join(storagePath, '.openrouter-key');
   if (key) {
-    db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('gemini_api_key', key);
+    db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('openrouter_api_key', key);
     fs.mkdirSync(storagePath, { recursive: true });
     fs.writeFileSync(keyFilePath, key, 'utf8');
-    if (workerManager) workerManager.setGeminiApiKey(key);
-    console.log('[main] Gemini key saved to DB + keyfile + sent to worker');
+    if (workerManager) workerManager.setOpenRouterKey(key);
   } else {
-    db.prepare('DELETE FROM settings WHERE key = ?').run('gemini_api_key');
+    db.prepare('DELETE FROM settings WHERE key = ?').run('openrouter_api_key');
     try { fs.unlinkSync(keyFilePath); } catch {}
   }
   return true;
 });
 
-ipcMain.handle('settings:getGeminiKey', () => {
-  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get('gemini_api_key');
+ipcMain.handle('settings:getOpenRouterKey', () => {
+  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get('openrouter_api_key');
   return { hasKey: !!(row && row.value) };
-});
-
-// ─── Vision Engine Selection ───
-ipcMain.handle('settings:setVisionEngine', (_, engine) => {
-  db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('vision_engine', engine);
-  if (workerManager) workerManager.setVisionEngine(engine);
-  console.log(`[main] Vision engine set to: ${engine}`);
-  return true;
-});
-
-ipcMain.handle('settings:getVisionEngine', () => {
-  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get('vision_engine');
-  return row ? row.value : 'auto';
 });
 
 // ─── History ───
