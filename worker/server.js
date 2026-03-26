@@ -2,6 +2,7 @@ const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const fsPromises = require('fs').promises;
 const Jimp = require('jimp');
 let sharp;
 try { sharp = require('sharp'); } catch { sharp = null; console.warn('[config] sharp not available — using Jimp for resizing'); }
@@ -2092,7 +2093,7 @@ app.post('/sort-local', async (req, res) => {
                         batchResults = await classifyBatchVision(validBuffers);
                     }
 
-                    // Process each file in the batch
+                    // Process each file in the batch — FAST PATH when API succeeds
                     for (let bi = 0; bi < batchFiles.length; bi++) {
                         if (cancelled || session.status === 'cancelled') { cancelled = true; return; }
                         const filePath = batchFiles[bi];
@@ -2102,6 +2103,7 @@ app.post('/sort-local', async (req, res) => {
                             let colorInfo;
                             const validIdx = validIndices.indexOf(bi);
                             if (batchResults && validIdx >= 0 && batchResults[validIdx]) {
+                                // FAST PATH: API already classified — skip local pipeline entirely
                                 colorInfo = {
                                     rgb: [128, 128, 128],
                                     category: batchResults[validIdx].category,
@@ -2110,15 +2112,14 @@ app.post('/sort-local', async (req, res) => {
                                     method: batchResults[validIdx].method || activeEngine + '-batch',
                                 };
                             } else {
-                                // Fallback to local analysis
+                                // SLOW PATH: fallback to local analysis
                                 colorInfo = await analyzeImageColor(filePath);
                             }
-
-                            const thumbUrl = await generateThumb(filePath, sessionId, `${processedCount}_${file}`);
 
                             const needsReview = colorInfo.category === 'unknown' || colorInfo.confidence === 'none' || colorInfo.confidence === 'very-low';
                             const folderName = needsReview ? 'please-double-check' : colorInfo.category;
 
+                            // Copy file (non-blocking)
                             const colorFolder = path.join(outputDir, folderName);
                             fs.mkdirSync(colorFolder, { recursive: true });
                             let destName = file;
@@ -2128,18 +2129,34 @@ app.post('/sort-local', async (req, res) => {
                                 destName = `${path.basename(file, ext)}_${counter}${ext}`;
                                 counter++;
                             }
-                            fs.copyFileSync(filePath, path.join(colorFolder, destName));
+                            // Use async copy — don't block the pipeline
+                            const copyPromise = fsPromises.copyFile(filePath, path.join(colorFolder, destName)).catch(() => {
+                                // Fallback to sync if async fails
+                                try { fs.copyFileSync(filePath, path.join(colorFolder, destName)); } catch {}
+                            });
+
+                            // Generate thumb in background — don't wait
+                            const thumbName = `${processedCount}_${file}`;
+                            const thumbPromise = generateThumb(filePath, sessionId, thumbName);
 
                             processedCount++;
                             session.colorCounts[folderName] = (session.colorCounts[folderName] || 0) + 1;
                             session.currentFile = file;
                             session.processed = processedCount;
 
+                            // Push result immediately (thumb will update async)
+                            const resultIdx = session.results.length;
                             session.results.push({
                                 filename: file, color: folderName, hex: colorInfo.hex, rgb: colorInfo.rgb,
-                                thumb: thumbUrl, confidence: colorInfo.confidence || 'unknown',
+                                thumb: null, confidence: colorInfo.confidence || 'unknown',
+                                method: colorInfo.method,
                                 needsReview, status: needsReview ? 'Needs Review' : 'Success'
                             });
+
+                            // Update thumb when ready (non-blocking)
+                            thumbPromise.then(url => { session.results[resultIdx].thumb = url; }).catch(() => {});
+                            // Ensure copy finishes before moving on
+                            await copyPromise;
                         } catch (err) {
                             console.error(`[${sessionId}][w${workerIdx}] Failed ${file}: ${err.message}`);
                             processedCount++;

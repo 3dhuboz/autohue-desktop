@@ -4,6 +4,7 @@ import { useWorker } from '../hooks/useWorker';
 import TachoGauge from '../components/TachoGauge';
 import WatermarkEditor from '../components/WatermarkEditor';
 import AiDisclaimer from '../components/AiDisclaimer';
+import SortAnimation from '../components/SortAnimation';
 import {
   CarIcon,
   FolderIcon,
@@ -768,40 +769,17 @@ export default function SortPage() {
               </div>
             </div>
 
-            {/* Live image feed */}
-            {stats.results.length > 0 && (
-              <div className="glass-card rounded-2xl p-5 overflow-hidden">
-                <h3 className="text-xs font-bold text-white/30 mb-3 flex items-center gap-2">
-                  <SpinnerIcon size={12} className="text-racing-500" />
-                  Live Sort Feed
-                  <span className="text-[10px] bg-racing-600/20 text-racing-400 px-2 py-0.5 rounded-full font-bold">LIVE</span>
-                </h3>
-                <div className="flex gap-3 overflow-x-auto pb-2">
-                  {stats.results.slice(-12).reverse().map((r, i) => {
-                    const info = COLOR_INFO[r.color] || COLOR_INFO['unknown'];
-                    return (
-                      <div key={`${r.file}-${i}`} className="shrink-0 w-[100px] animate-slide-in-right cursor-pointer" style={{ animationDelay: `${i * 0.05}s` }}
-                        onClick={() => setLightboxIdx(stats.results.length - 1 - i)}
-                      >
-                        <div className="relative rounded-lg overflow-hidden bg-black/40 aspect-[4/3] border border-white/5 hover:border-racing-500/40 transition-colors">
-                          {r.thumb ? (
-                            <img src={`${workerUrl}${r.thumb}`} alt={r.file} className="w-full h-full object-cover" loading="lazy" />
-                          ) : (
-                            <div className="w-full h-full flex items-center justify-center text-white/10">
-                              <CarIcon size={24} />
-                            </div>
-                          )}
-                          <div className="absolute bottom-0 inset-x-0 flex items-center gap-1 px-1.5 py-1 bg-black/70 backdrop-blur-sm color-stamp">
-                            <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: info.swatch, boxShadow: `0 0 6px ${info.glow}` }} />
-                            <span className="text-[8px] text-white/60 truncate">{info.label}</span>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
+            {/* Sorting Animation */}
+            <div className="glass-card rounded-2xl p-5 overflow-hidden">
+              <SortAnimation
+                results={stats.results.map(r => ({
+                  filename: r.file || r.filename || '',
+                  color: r.color || 'unknown',
+                  thumb: r.thumb ? `${workerUrl}${r.thumb}` : null,
+                }))}
+                isProcessing={phase === 'sorting'}
+              />
+            </div>
 
             {/* Pipeline visualization */}
             <div className="glass-card rounded-2xl p-5 relative overflow-hidden">

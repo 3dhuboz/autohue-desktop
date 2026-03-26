@@ -1,41 +1,46 @@
-# AutoHue — Next Session Focus: POLISH & SPEED
+# AutoHue — Next Session
 
-## Current State: v1.5.2
-- Repo: C:\Users\Steve\Desktop\GitHub\autohue-desktop
-- Deploy repo: github.com/3dhuboz/autohue-desktop
-- API: autohue-api.steve-700.workers.dev
-- Admin: autohue-admin.pages.dev
+## Status
+- **v1.7.5** deployed, OpenRouter + Gemini Flash WORKING
+- Correct classifications confirmed (Yellow, White cars)
+- Speed ~0.2 img/sec — needs optimization (local pipeline running after API)
+- Fixed: port conflict, XOR key, Gemini quota (switched to OpenRouter)
 
-## Priority 1: SPEED (must feel instant)
-- Currently ~7-10s per image with Claude Sonnet 4
-- Jimp skip threshold at 10MB but large motorsport JPEGs still slow
-- Consider: sharp native bindings for instant resize
-- Consider: claude-3-5-haiku if available on the API key
-- Consider: increase batch size to 6-8 images per API call
-- Consider: pre-read file buffers while previous batch is being classified
+## Priority Tasks
 
-## Priority 2: UI POLISH
-- Live Sort Feed needs dramatic "fly into folder" animation
-- Badge still flickers between Local AI / AI Vision Pro
-- Cancel button needs full UI reset
-- White swatch dot needs to be clearly white
-- Extraction phase needs exciting progress (not just spinning)
-- Output folder should open automatically on completion
-- First-run onboarding flow
+### 1. Sorting Animation (User's Vision — HIGH PRIORITY)
+Replace current live feed with animated pipeline:
+- Image slides in from LEFT
+- Enters "AutoHue Brain" graphic (centered, pulsing)
+- Green toast/tick animation with detected color
+- Image animates OUT to folder icon on RIGHT
+- One-at-a-time visually (batch processing behind scenes)
+- Must look fancy/polished — this is the showcase feature
 
-## Priority 3: ACCURACY EDGE CASES  
-- White vs Silver/Grey in heavy smoke (improved but not perfect)
-- Small cars in frame with dominant grass → misclassified as yellow/green
-- Dark blue vs black in low light
-- Prompt: "Focus on the LARGEST vehicle, not background"
+### 2. Speed Optimization
+- Skip local pipeline entirely when OpenRouter returns a result
+- Currently: API returns color → local pipeline ALSO runs (wastes 5-7s)
+- Should be: API returns → copy file → done
+- Target: 2-5 img/sec
 
-## Priority 4: REVENUE FEATURES
-- Token top-up packs (buy extra when daily limit hit)
-- Code signing ($200-400/yr) to remove Smart App Control warning
+### 3. Sort Resume on Crash/Shutdown
+- Save state to DB (processed files, remaining, output folder)
+- On restart, offer to resume incomplete sessions
+- Skip already-processed files
 
-## Architecture Notes
-- Worker is esbuild-bundled to worker/dist/server.js (MUST rebuild after source changes)
-- Claude API key flows via: DB settings → .claude-key file → worker reads on startup
-- Model: claude-sonnet-4-20250514 (haiku-4 not available on this key)
-- Pricing: Trial free 50/day, Hobbyist $9 500/day, Pro $29 2K/day, Unlimited $79 5K/day
-- Claude Vision key given to ALL tiers (trial sees real accuracy)
+### 4. Progress = OVERALL Progress
+- Show total across ALL files (e.g., "382/1200"), not batch (e.g., "3/9")
+- Progress bar = total percentage
+
+### 5. Clean Up
+- Remove debug logs (openrouter-debug.log, debug-startup.log)
+- Re-add IP protection with working XOR (Buffer.from hex approach)
+- Consolidate messy version jumps
+
+## Architecture
+- **Repo**: github.com/3dhuboz/autohue-desktop
+- **Stack**: Electron + React + Express worker (forked process)
+- **AI**: OpenRouter → Gemini 2.5 Flash (batch 15, 3 concurrent)
+- **Fallback**: Claude Vision → Local ONNX (SSD-MobileNet + LAB)
+- **Worker port**: 3099 (bound to 127.0.0.1)
+- **Keys**: DB (openrouter_api_key) + keyfile (.openrouter-key)
