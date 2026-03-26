@@ -69,12 +69,17 @@ function StatusBadgeIcon({ status }: { status: string }) {
 
 // ─── Component ──────────────────────────────────────────────────
 
+const HISTORY_RETENTION_DAYS = 14; // Auto-hide sorts older than this
+
 export default function HistoryPage() {
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const { workerUrl } = useWorker();
   const [activeSession, setActiveSession] = useState<{ sid: string; status: string; processed: number; total: number; currentFile: string } | null>(null);
   const activePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [selectMode, setSelectMode] = useState(false);
+  const [expandedId, setExpandedId] = useState<number | null>(null);
 
   useEffect(() => {
     window.electronAPI.getHistory()
@@ -125,6 +130,30 @@ export default function HistoryPage() {
   const handleDelete = async (id: number) => {
     await window.electronAPI.deleteHistory(id);
     setHistory(prev => prev.filter(h => h.id !== id));
+    setSelectedIds(prev => { const next = new Set(prev); next.delete(id); return next; });
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedIds.size === 0) return;
+    if (!confirm(`Delete ${selectedIds.size} sort${selectedIds.size > 1 ? 's' : ''}? This cannot be undone.`)) return;
+    for (const id of selectedIds) {
+      await window.electronAPI.deleteHistory(id);
+    }
+    setHistory(prev => prev.filter(h => !selectedIds.has(h.id)));
+    setSelectedIds(new Set());
+    setSelectMode(false);
+  };
+
+  const toggleSelect = (id: number) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const selectAll = () => {
+    setSelectedIds(new Set(filteredHistory.map(h => h.id)));
   };
 
   const handleOpenFolder = async (outputPath: string | null) => {
@@ -133,12 +162,25 @@ export default function HistoryPage() {
     }
   };
 
+  const handleClickEntry = (entry: HistoryEntry) => {
+    if (selectMode) {
+      toggleSelect(entry.id);
+    } else {
+      // Expand/collapse to show details + open folder button
+      setExpandedId(prev => prev === entry.id ? null : entry.id);
+    }
+  };
+
+  // Filter out entries older than retention period
+  const cutoffDate = new Date(Date.now() - HISTORY_RETENTION_DAYS * 86400000).toISOString();
+  const filteredHistory = history.filter(h => h.created_at >= cutoffDate);
+
   const parseColorCounts = (json: string | null): Record<string, number> => {
     if (!json) return {};
     try { return JSON.parse(json); } catch { return {}; }
   };
 
-  const groups = useMemo(() => groupByDate(history), [history]);
+  const groups = useMemo(() => groupByDate(filteredHistory), [filteredHistory]);
 
   // ─── Loading skeleton ─────────────────────────────────────────
 
@@ -200,9 +242,38 @@ export default function HistoryPage() {
 
   return (
     <div className="container mx-auto px-6 max-w-4xl mt-6 pb-20">
-      <h1 className="text-2xl font-heading font-black mb-6">
-        Processing <span className="text-racing-500">History</span>
-      </h1>
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-2xl font-heading font-black">
+          Processing <span className="text-racing-500">History</span>
+        </h1>
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-white/20">Showing last {HISTORY_RETENTION_DAYS} days</span>
+          {selectMode ? (
+            <>
+              <button onClick={selectAll} className="text-[11px] text-white/40 hover:text-white/70 px-2 py-1 rounded transition-colors">
+                Select All
+              </button>
+              <button
+                onClick={handleBulkDelete}
+                disabled={selectedIds.size === 0}
+                className="text-[11px] px-3 py-1.5 rounded-lg bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 disabled:opacity-30 transition-all flex items-center gap-1"
+              >
+                <TrashIcon size={11} /> Delete ({selectedIds.size})
+              </button>
+              <button onClick={() => { setSelectMode(false); setSelectedIds(new Set()); }} className="text-[11px] text-white/30 hover:text-white/50 px-2 py-1">
+                Cancel
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={() => setSelectMode(true)}
+              className="text-[11px] text-white/30 hover:text-white/50 px-2 py-1 rounded border border-white/10 hover:border-white/20 transition-all"
+            >
+              Select
+            </button>
+          )}
+        </div>
+      </div>
 
       {/* Active session banner */}
       {activeSession && (
@@ -270,17 +341,32 @@ export default function HistoryPage() {
                 const accent = STATUS_ACCENT[entry.status] || STATUS_ACCENT.processing;
                 const badge = STATUS_BADGE[entry.status] || STATUS_BADGE.processing;
 
+                const isExpanded = expandedId === entry.id;
+                const isSelected = selectedIds.has(entry.id);
+                const daysOld = Math.floor((Date.now() - date.getTime()) / 86400000);
+                const daysLeft = HISTORY_RETENTION_DAYS - daysOld;
+
                 return (
                   <div
                     key={entry.id}
-                    className="glass-card rounded-xl overflow-hidden transition-all duration-200 hover:shadow-lg hover:shadow-black/20"
+                    className={`glass-card rounded-xl overflow-hidden transition-all duration-200 hover:shadow-lg hover:shadow-black/20 cursor-pointer ${isSelected ? 'ring-1 ring-racing-500/50 bg-racing-500/5' : ''}`}
                     style={{ transform: 'translateY(0)' }}
+                    onClick={() => handleClickEntry(entry)}
                     onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.transform = 'translateY(-2px)'; }}
                     onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.transform = 'translateY(0)'; }}
                   >
                     <div className="flex">
                       {/* Left accent stripe */}
                       <div className="w-[2px] shrink-0" style={{ background: accent }} />
+
+                      {/* Select checkbox */}
+                      {selectMode && (
+                        <div className="flex items-center pl-3">
+                          <div className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-colors ${isSelected ? 'bg-racing-500 border-racing-500' : 'border-white/20'}`}>
+                            {isSelected && <CheckIcon size={10} className="text-white" />}
+                          </div>
+                        </div>
+                      )}
 
                       <div className="flex items-center gap-4 p-4 flex-1 min-w-0">
                         {/* Info */}
@@ -326,27 +412,82 @@ export default function HistoryPage() {
                           )}
                         </div>
 
-                        {/* Action buttons */}
-                        <div className="flex gap-1.5 shrink-0">
-                          {entry.output_path && (
-                            <button
-                              onClick={() => handleOpenFolder(entry.output_path)}
-                              className="tooltip btn-carbon w-8 h-8 rounded-lg flex items-center justify-center"
-                              data-tooltip="Open folder"
-                            >
-                              <FolderIcon size={14} className="text-white/60" />
-                            </button>
+                        {/* Action buttons + retention badge */}
+                        <div className="flex items-center gap-2 shrink-0">
+                          {daysLeft <= 3 && daysLeft > 0 && (
+                            <span className="text-[9px] text-amber-400/60 bg-amber-500/10 px-1.5 py-0.5 rounded">
+                              {daysLeft}d left
+                            </span>
                           )}
-                          <button
-                            onClick={() => handleDelete(entry.id)}
-                            className="tooltip w-8 h-8 rounded-lg flex items-center justify-center text-white/20 hover:text-red-400 hover:bg-red-500/10 border border-transparent hover:border-red-500/20 transition-all"
-                            data-tooltip="Delete"
-                          >
-                            <TrashIcon size={14} />
-                          </button>
+                          {!selectMode && (
+                            <div className="flex gap-1.5">
+                              {entry.output_path && (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); handleOpenFolder(entry.output_path); }}
+                                  className="tooltip btn-carbon w-8 h-8 rounded-lg flex items-center justify-center"
+                                  data-tooltip="Open folder"
+                                >
+                                  <FolderIcon size={14} className="text-white/60" />
+                                </button>
+                              )}
+                              <button
+                                onClick={(e) => { e.stopPropagation(); handleDelete(entry.id); }}
+                                className="tooltip w-8 h-8 rounded-lg flex items-center justify-center text-white/20 hover:text-red-400 hover:bg-red-500/10 border border-transparent hover:border-red-500/20 transition-all"
+                                data-tooltip="Delete"
+                              >
+                                <TrashIcon size={14} />
+                              </button>
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>
+
+                    {/* Expanded detail panel */}
+                    {isExpanded && (
+                      <div className="border-t border-white/[0.06] bg-white/[0.02] px-6 py-4 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div className="text-xs text-white/40">
+                            <span className="text-white/60 font-bold">{entry.image_count}</span> images sorted into{' '}
+                            <span className="text-white/60 font-bold">{colorKeys.length}</span> color folders
+                          </div>
+                          <div className="flex gap-2">
+                            {entry.output_path && (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); handleOpenFolder(entry.output_path); }}
+                                className="text-[11px] px-3 py-1.5 rounded-lg bg-racing-500/10 text-racing-400 border border-racing-500/20 hover:bg-racing-500/20 transition-all flex items-center gap-1.5"
+                              >
+                                <FolderIcon size={12} /> Open Sorted Folder
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Color breakdown */}
+                        {colorKeys.length > 0 && (
+                          <div className="grid grid-cols-4 gap-2">
+                            {colorKeys.map(color => {
+                              const hex = SWATCH[color] || '#666';
+                              const count = colors[color];
+                              const pct = entry.image_count > 0 ? Math.round((count / entry.image_count) * 100) : 0;
+                              return (
+                                <div key={color} className="flex items-center gap-2 bg-white/[0.03] rounded-lg px-2.5 py-1.5">
+                                  <div className="w-3 h-3 rounded-[3px] shrink-0" style={{ background: hex }} />
+                                  <div className="min-w-0">
+                                    <div className="text-[10px] text-white/50 capitalize truncate">{color.replace('-', '/')}</div>
+                                    <div className="text-[11px] text-white/70 font-bold">{count} <span className="text-white/30 font-normal">({pct}%)</span></div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        <div className="text-[10px] text-white/20 pt-1">
+                          Available for {daysLeft > 0 ? `${daysLeft} more day${daysLeft !== 1 ? 's' : ''}` : 'cleanup soon'} · Session ID: {entry.session_id?.slice(0, 8) || 'N/A'}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 );
               })}

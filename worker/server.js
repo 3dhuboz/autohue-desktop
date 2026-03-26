@@ -1738,32 +1738,145 @@ app.post('/sort-local', async (req, res) => {
         const extractDir = path.join(sessionUploadDir, '_extracted');
         fs.mkdirSync(extractDir, { recursive: true });
 
+        // ── PIPELINE: Extract + Classify simultaneously ──
+        // Start processing images AS they're extracted (don't wait for full extraction)
+        // This dramatically reduces total time for large archives
         (async () => {
             try {
-                let imageCount = 0;
-                if (/\.zip$/i.test(inputPath)) {
-                    imageCount = await extractZip(inputPath, extractDir, session);
-                } else if (/\.rar$/i.test(inputPath)) {
-                    imageCount = await extractRar(inputPath, extractDir, session);
-                }
-                console.log(`[${sessionId}] Extracted ${imageCount} images from archive`);
+                const outputDir = path.join(OUTPUT_DIR, sessionId);
+                fs.mkdirSync(outputDir, { recursive: true });
 
-                // Now collect and process
-                const files = collectImageFiles(extractDir);
-                if (files.length === 0) {
-                    session.status = 'completed';
-                    session.total = 0;
-                    session.currentFile = 'No images found in archive';
-                    return;
-                }
-                session.total = files.length;
-                session.total_images = files.length;
+                const pendingFiles = []; // Queue of extracted files ready to classify
+                let extractionDone = false;
+                let extractedCount = 0;
+                let processedCount = 0;
+                session.results = [];
+                session.colorCounts = {};
+
+                // Start extraction in background — pushes files to queue as they appear
+                const extractionPromise = (async () => {
+                    if (/\.zip$/i.test(inputPath)) {
+                        await new Promise((resolve, reject) => {
+                            fs.createReadStream(inputPath)
+                                .pipe(unzipper.Parse())
+                                .on('entry', (entry) => {
+                                    const fileName = path.basename(entry.path);
+                                    if (/\.(jpg|jpeg|png|gif|bmp|webp)$/i.test(fileName) && !fileName.startsWith('.') && !fileName.startsWith('__')) {
+                                        extractedCount++;
+                                        let destName = fileName;
+                                        let c = 1;
+                                        while (fs.existsSync(path.join(extractDir, destName))) {
+                                            const ext = path.extname(fileName);
+                                            destName = `${path.basename(fileName, ext)}_${c}${ext}`;
+                                            c++;
+                                        }
+                                        const destPath = path.join(extractDir, destName);
+                                        const ws = fs.createWriteStream(destPath);
+                                        entry.pipe(ws);
+                                        ws.on('finish', () => {
+                                            pendingFiles.push(destPath);
+                                            session.total = extractedCount;
+                                            session.total_images = extractedCount;
+                                            session.currentFile = `Extracting: ${destName} (${extractedCount} found)`;
+                                        });
+                                    } else {
+                                        entry.autodrain();
+                                    }
+                                })
+                                .on('close', resolve)
+                                .on('error', reject);
+                        });
+                    } else if (/\.rar$/i.test(inputPath)) {
+                        await extractRar(inputPath, extractDir, session);
+                        // For RAR, add all extracted files to queue at once
+                        const rarFiles = collectImageFiles(extractDir);
+                        extractedCount = rarFiles.length;
+                        session.total = extractedCount;
+                        session.total_images = extractedCount;
+                        pendingFiles.push(...rarFiles);
+                    }
+                    extractionDone = true;
+                    console.log(`[${sessionId}] Extraction complete: ${extractedCount} images`);
+                })();
+
+                // Classification loop — processes files as they appear in the queue
+                // Starts as soon as first image is extracted
                 session.status = 'processing';
-                await processSessionFiles(sessionId, files);
+                console.log(`[${sessionId}] Pipeline started — classifying as images are extracted`);
+
+                async function waitIfPaused() {
+                    while (session.status === 'paused') {
+                        await new Promise(r => setTimeout(r, 250));
+                    }
+                    if (session.status === 'cancelled') throw new Error('CANCELLED');
+                }
+
+                while (!extractionDone || pendingFiles.length > 0) {
+                    if (pendingFiles.length === 0) {
+                        // No files ready yet — wait briefly
+                        await new Promise(r => setTimeout(r, 200));
+                        continue;
+                    }
+
+                    await waitIfPaused();
+                    const filePath = pendingFiles.shift();
+                    const file = path.basename(filePath);
+
+                    try {
+                        const colorInfo = await analyzeImageColor(filePath);
+                        const thumbUrl = await generateThumb(filePath, sessionId, `${processedCount}_${file}`);
+
+                        const needsReview = colorInfo.category === 'unknown' || colorInfo.confidence === 'none' || colorInfo.confidence === 'very-low';
+                        const folderName = needsReview ? 'please-double-check' : colorInfo.category;
+
+                        const colorFolder = path.join(outputDir, folderName);
+                        fs.mkdirSync(colorFolder, { recursive: true });
+                        let destName = file;
+                        let counter = 1;
+                        while (fs.existsSync(path.join(colorFolder, destName))) {
+                            const ext = path.extname(file);
+                            destName = `${path.basename(file, ext)}_${counter}${ext}`;
+                            counter++;
+                        }
+                        fs.copyFileSync(filePath, path.join(colorFolder, destName));
+
+                        processedCount++;
+                        session.colorCounts[folderName] = (session.colorCounts[folderName] || 0) + 1;
+                        session.currentFile = file;
+                        session.processed = processedCount;
+
+                        session.results.push({
+                            filename: file, color: folderName, hex: colorInfo.hex, rgb: colorInfo.rgb,
+                            thumb: thumbUrl, confidence: colorInfo.confidence || 'unknown',
+                            needsReview, status: needsReview ? 'Needs Review' : 'Success'
+                        });
+
+                        if (processedCount % 10 === 0) {
+                            console.log(`[${sessionId}] Processed ${processedCount}/${extractedCount} (${pendingFiles.length} queued)`);
+                        }
+                    } catch (err) {
+                        if (err.message === 'CANCELLED') throw err;
+                        console.error(`[${sessionId}] Failed to process ${file}:`, err.message);
+                        processedCount++;
+                        session.processed = processedCount;
+                    }
+                }
+
+                // Wait for extraction to fully complete (should already be done)
+                await extractionPromise;
+
+                session.status = 'completed';
+                session.currentFile = '';
+                console.log(`[${sessionId}] Pipeline complete! ${processedCount} images sorted into ${Object.keys(session.colorCounts).length} colors.`);
             } catch (err) {
-                console.error(`[${sessionId}] Archive processing error:`, err.message);
-                session.status = 'error';
-                session.error = err.message;
+                if (err.message === 'CANCELLED') {
+                    session.currentFile = '';
+                    console.log(`[${sessionId}] Cancelled.`);
+                } else {
+                    console.error(`[${sessionId}] Archive processing error:`, err.message);
+                    session.status = 'error';
+                    session.error = err.message;
+                }
             }
         })();
 
