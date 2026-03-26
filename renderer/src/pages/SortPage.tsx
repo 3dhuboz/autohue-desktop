@@ -778,6 +778,7 @@ export default function SortPage() {
                   thumb: r.thumb ? `${workerUrl}${r.thumb}` : null,
                 }))}
                 isProcessing={phase === 'sorting'}
+                totalProcessed={stats.processed}
               />
             </div>
 
@@ -1046,15 +1047,17 @@ export default function SortPage() {
               </button>
             )}
 
-            {/* Image */}
-            <div className="max-w-[85vw] max-h-[85vh] relative" onClick={(e) => e.stopPropagation()}>
-              {r.thumb && (
-                <img
-                  src={`${workerUrl}${r.thumb}`}
-                  alt={r.file}
-                  className="max-w-full max-h-[80vh] object-contain rounded-xl shadow-2xl"
-                />
-              )}
+            {/* Image — use full-size from output folder, fallback to thumb */}
+            <div className="max-w-[90vw] max-h-[90vh] relative" onClick={(e) => e.stopPropagation()}>
+              <img
+                src={`${workerUrl}/output/${sessionId}/${encodeURIComponent(r.color)}/${encodeURIComponent(r.filename || r.file)}`}
+                alt={r.filename || r.file}
+                className="max-w-full max-h-[85vh] object-contain rounded-xl shadow-2xl"
+                onError={(e) => {
+                  // Fallback to thumbnail if full image not found
+                  if (r.thumb) (e.target as HTMLImageElement).src = `${workerUrl}${r.thumb}`;
+                }}
+              />
               {/* Info bar */}
               <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/80 to-transparent rounded-b-xl px-6 py-4">
                 <div className="flex items-center justify-between">

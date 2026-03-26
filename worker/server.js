@@ -173,7 +173,7 @@ async function classifyBatchWithClaude(imageBuffers) {
         }
         content.push({
             type: 'text',
-            text: `There are ${imageBuffers.length} motorsport/drag racing photos above (numbered 1 to ${imageBuffers.length}). For EACH photo, identify the BODY/PAINT color of the main car/vehicle. Reply with EXACTLY ${imageBuffers.length} lines. Each line = just ONE color word from: red, blue, green, yellow, orange, purple, pink, brown, black, white, silver-grey. IGNORE smoke, dirt, grass, sky. Focus ONLY on the car body paint color.`,
+            text: `There are ${imageBuffers.length} motorsport/drag racing photos above (numbered 1 to ${imageBuffers.length}). For EACH photo, identify the BODY/PAINT color of the main car/vehicle. Reply with EXACTLY ${imageBuffers.length} lines. Each line = just ONE color word from: red, blue, green, yellow, orange, purple, pink, brown, black, white, silver-grey. RULES: 1) IGNORE smoke, dirt, grass, sky — only the car body paint. 2) Dark charcoal, gunmetal, dark grey = "silver-grey" NOT "blue". 3) Only say "blue" for clearly bright/vivid blue paint. 4) Teal/turquoise/cyan = "blue". 5) White cars in smoke = "white" not "silver-grey".`,
         });
 
         const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -287,7 +287,7 @@ async function classifyBatchWithOpenRouter(imageBuffers) {
         }
         content.push({
             type: 'text',
-            text: `There are ${imageBuffers.length} motorsport/drag racing photos above (numbered 1 to ${imageBuffers.length}). For EACH photo, identify the BODY/PAINT color of the main car/vehicle. Reply with EXACTLY ${imageBuffers.length} lines. Each line = just ONE color word from: red, blue, green, yellow, orange, purple, pink, brown, black, white, silver-grey. IGNORE smoke, dirt, grass, sky. Focus ONLY on the car body paint color.`,
+            text: `There are ${imageBuffers.length} motorsport/drag racing photos above (numbered 1 to ${imageBuffers.length}). For EACH photo, identify the BODY/PAINT color of the main car/vehicle. Reply with EXACTLY ${imageBuffers.length} lines. Each line = just ONE color word from: red, blue, green, yellow, orange, purple, pink, brown, black, white, silver-grey. RULES: 1) IGNORE smoke, dirt, grass, sky — only the car body paint. 2) Dark charcoal, gunmetal, dark grey = "silver-grey" NOT "blue". 3) Only say "blue" for clearly bright/vivid blue paint. 4) Teal/turquoise/cyan = "blue". 5) White cars in smoke = "white" not "silver-grey".`,
         });
 
         const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {

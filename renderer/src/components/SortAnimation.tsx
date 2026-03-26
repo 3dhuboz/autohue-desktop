@@ -10,6 +10,7 @@ interface SortResult {
 interface SortAnimationProps {
   results: SortResult[];
   isProcessing: boolean;
+  totalProcessed?: number;
 }
 
 // ── Color lookup ──
@@ -30,7 +31,7 @@ const COLOR_LABELS: Record<string, string> = {
 // ── Animation phases — FAST to match real processing speed ──
 type AnimPhase = 'enter' | 'analyze' | 'result' | 'exit' | 'idle';
 
-export default function SortAnimation({ results, isProcessing }: SortAnimationProps) {
+export default function SortAnimation({ results, isProcessing, totalProcessed }: SortAnimationProps) {
   const [queue, setQueue] = useState<SortResult[]>([]);
   const [current, setCurrent] = useState<SortResult | null>(null);
   const [phase, setPhase] = useState<AnimPhase>('idle');
@@ -300,7 +301,7 @@ export default function SortAnimation({ results, isProcessing }: SortAnimationPr
         <div className="space-y-2">
           <div className="flex items-center gap-2">
             <span className="text-[10px] text-white/25 uppercase tracking-widest font-bold">Recent Output</span>
-            <span className="text-[9px] text-green-400/50 tabular-nums">{completed.length} sorted</span>
+            <span className="text-[9px] text-green-400/50 tabular-nums">{totalProcessed ?? completed.length} sorted</span>
           </div>
           <div className="flex gap-1.5 overflow-x-auto pb-1" style={{ scrollbarWidth: 'thin', scrollbarColor: 'rgba(255,255,255,0.1) transparent' }}>
             {completed.slice(0, 20).map((r, i) => {
