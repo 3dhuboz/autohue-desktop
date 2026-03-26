@@ -2387,7 +2387,11 @@ app.get('/download/:sessionId', (req, res) => {
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', `attachment; filename=${zipFilename}`);
 
-    const archive = archiver('zip', { zlib: { level: 6 } });
+    const archive = archiver('zip', { zlib: { level: 1 } }); // Fast compression for large batches
+    archive.on('error', (err) => {
+        console.error(`[download] Archive error: ${err.message}`);
+        if (!res.headersSent) res.status(500).json({ error: 'Failed to create ZIP' });
+    });
     archive.pipe(res);
     archive.directory(outputDir, false);
     archive.finalize();

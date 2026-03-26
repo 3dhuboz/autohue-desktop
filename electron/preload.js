@@ -41,4 +41,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // App info
   getVersion: () => ipcRenderer.invoke('app:version'),
   getUserDataPath: () => ipcRenderer.invoke('app:userData'),
+
+  // Download events
+  onDownloadComplete: (cb) => ipcRenderer.on('download:complete', (_, data) => cb(data)),
+  onDownloadCancelled: (cb) => ipcRenderer.on('download:cancelled', () => cb()),
 });

@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { useLicense } from '../hooks/useLicense';
 import { useWorker } from '../hooks/useWorker';
+import { useToast } from '../components/Toast';
 import TachoGauge from '../components/TachoGauge';
 import WatermarkEditor from '../components/WatermarkEditor';
 import AiDisclaimer from '../components/AiDisclaimer';
@@ -73,6 +74,19 @@ interface ProcessingStats {
 export default function SortPage() {
   const { license, checkQuota, recordUsage } = useLicense();
   const { workerUrl, ready: workerReady, health } = useWorker();
+  const { showToast } = useToast();
+
+  // Listen for download completion toast
+  useEffect(() => {
+    const api = (window as any).electronAPI;
+    if (!api?.onDownloadComplete) return;
+    api.onDownloadComplete((data: { filename: string; path: string }) => {
+      showToast(`Saved: ${data.filename}`, 'success');
+    });
+    api.onDownloadCancelled?.(() => {
+      showToast('Download cancelled', 'info');
+    });
+  }, [showToast]);
 
   const [phase, setPhase] = useState<Phase>('upload');
   const [files, setFiles] = useState<File[]>([]);

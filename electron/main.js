@@ -62,7 +62,20 @@ function createWindow() {
         require('electron').shell.openExternal(url);
       }
     }
-    return { action: 'deny' }; // Never open new Electron windows
+    return { action: 'deny' };
+  });
+
+  // Track download completion and notify renderer
+  mainWindow.webContents.session.on('will-download', (event, item) => {
+    item.once('done', (e, state) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        if (state === 'completed') {
+          mainWindow.webContents.send('download:complete', { path: item.getSavePath(), filename: item.getFilename() });
+        } else if (state === 'cancelled') {
+          mainWindow.webContents.send('download:cancelled');
+        }
+      }
+    });
   });
 
   mainWindow.on('closed', () => {
