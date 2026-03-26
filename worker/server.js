@@ -172,7 +172,7 @@ async function classifyBatchWithClaude(imageBuffers) {
         }
         content.push({
             type: 'text',
-            text: `There are ${imageBuffers.length} photos above (numbered 1 to ${imageBuffers.length}). ${_d(_CP)}`,
+            text: `There are ${imageBuffers.length} motorsport/drag racing photos above (numbered 1 to ${imageBuffers.length}). For EACH photo, identify the BODY/PAINT color of the main car/vehicle. Reply with EXACTLY ${imageBuffers.length} lines. Each line = just ONE color word from: red, blue, green, yellow, orange, purple, pink, brown, black, white, silver-grey. IGNORE smoke, dirt, grass, sky. Focus ONLY on the car body paint color.`,
         });
 
         const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -275,8 +275,12 @@ function parseColorLines(rawText, expectedCount) {
 const OPENROUTER_BATCH_SIZE = 15;
 
 async function classifyBatchWithOpenRouter(imageBuffers) {
-    if (!OPENROUTER_KEY || imageBuffers.length === 0) return null;
+    if (!OPENROUTER_KEY || imageBuffers.length === 0) {
+        try { fs.appendFileSync(path.join(STORAGE_ROOT, 'openrouter-debug.log'), new Date().toISOString() + ` SKIP: key=${!!OPENROUTER_KEY} images=${imageBuffers.length}\n`); } catch {}
+        return null;
+    }
     try {
+        try { fs.appendFileSync(path.join(STORAGE_ROOT, 'openrouter-debug.log'), new Date().toISOString() + ` CALL: ${imageBuffers.length} images, sizes: ${imageBuffers.map(b=>b.length).join(',')}\n`); } catch {}
         // Build OpenAI-compatible content array: images + text
         const content = [];
         for (const buf of imageBuffers) {
@@ -287,7 +291,7 @@ async function classifyBatchWithOpenRouter(imageBuffers) {
         }
         content.push({
             type: 'text',
-            text: `There are ${imageBuffers.length} photos above (numbered 1 to ${imageBuffers.length}). ${_d(_CP)}`,
+            text: `There are ${imageBuffers.length} motorsport/drag racing photos above (numbered 1 to ${imageBuffers.length}). For EACH photo, identify the BODY/PAINT color of the main car/vehicle. Reply with EXACTLY ${imageBuffers.length} lines. Each line = just ONE color word from: red, blue, green, yellow, orange, purple, pink, brown, black, white, silver-grey. IGNORE smoke, dirt, grass, sky. Focus ONLY on the car body paint color.`,
         });
 
         const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -309,12 +313,18 @@ async function classifyBatchWithOpenRouter(imageBuffers) {
 
         if (!res.ok) {
             const errText = await res.text();
-            console.error(`[openrouter] API error ${res.status}: ${errText.slice(0, 200)}`);
+            const errMsg = `[openrouter] API error ${res.status}: ${errText.slice(0, 200)}`;
+            console.error(errMsg);
+            try { fs.appendFileSync(path.join(STORAGE_ROOT, 'openrouter-debug.log'), new Date().toISOString() + ' ' + errMsg + '\n'); } catch {}
             return null;
         }
 
         const data = await res.json();
         const rawText = (data.choices?.[0]?.message?.content || '').trim();
+
+        // Debug log the raw response
+        try { fs.appendFileSync(path.join(STORAGE_ROOT, 'openrouter-debug.log'), new Date().toISOString() + ' RAW: ' + rawText + '\n'); } catch {}
+
         const results = parseColorLines(rawText, imageBuffers.length);
         results.forEach(r => { if (r) r.method = 'openrouter-batch'; });
 
@@ -322,7 +332,9 @@ async function classifyBatchWithOpenRouter(imageBuffers) {
         console.log(`  [openrouter] ${validCount}/${imageBuffers.length}: ${results.map(r => r?.category || '?').join(', ')}`);
         return results;
     } catch (err) {
-        console.error(`[openrouter] Failed: ${err.message}`);
+        const errMsg = `[openrouter] Failed: ${err.message}`;
+        console.error(errMsg);
+        try { fs.appendFileSync(path.join(STORAGE_ROOT, 'openrouter-debug.log'), new Date().toISOString() + ' ' + errMsg + '\n'); } catch {}
         return null;
     }
 }
