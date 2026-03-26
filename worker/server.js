@@ -2199,20 +2199,46 @@ app.post('/sort-local', async (req, res) => {
                     }
                 }
 
-                // Run N concurrent batch workers
+                // Run N concurrent batch workers with stall detection
+                let lastProgressAt = Date.now();
+                let lastProgressCount = 0;
+                const STALL_TIMEOUT_MS = 30000; // 30s with no progress = stalled
+
                 const workers = Array.from({ length: BATCH_CONCURRENCY }, async (_, workerIdx) => {
                     while (!extractionDone || pendingFiles.length > 0) {
                         if (cancelled || session.status === 'cancelled') { cancelled = true; return; }
+
+                        // Stall detection: if extraction is done and no progress for 30s, break
+                        if (extractionDone && pendingFiles.length === 0) {
+                            if (processedCount > lastProgressCount) {
+                                lastProgressCount = processedCount;
+                                lastProgressAt = Date.now();
+                            }
+                            if (Date.now() - lastProgressAt > STALL_TIMEOUT_MS) {
+                                console.log(`[${sessionId}][w${workerIdx}] Stall detected — no progress for ${STALL_TIMEOUT_MS/1000}s. Breaking.`);
+                                return;
+                            }
+                            await new Promise(r => setTimeout(r, 200));
+                            continue;
+                        }
+
                         if (pendingFiles.length === 0) {
                             await new Promise(r => setTimeout(r, 200));
                             continue;
                         }
 
                         const batch = grabBatch(activeBatchSize);
-                        if (batch.length === 0) continue;
+                        if (batch.length === 0) {
+                            // Quota reached or no files — break if extraction done
+                            if (extractionDone) return;
+                            await new Promise(r => setTimeout(r, 200));
+                            continue;
+                        }
 
+                        lastProgressAt = Date.now();
                         try {
                             await processBatch(batch, workerIdx);
+                            lastProgressCount = processedCount;
                         } catch (err) {
                             if (err.message === 'CANCELLED') { cancelled = true; return; }
                             console.error(`[${sessionId}][w${workerIdx}] Batch error: ${err.message}`);

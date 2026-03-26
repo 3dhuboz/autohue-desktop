@@ -364,7 +364,20 @@ export default function SortPage() {
             completionRecorded.current = true;
             const processed = data.processed || 0;
             const colorCounts = data.color_counts || {};
-            recordUsage(sid, processed, colorCounts).catch(console.error);
+            const colors = Object.keys(colorCounts).length;
+            recordUsage(sid, processed, colorCounts).then(() => refreshLicense()).catch(console.error);
+
+            // Completion toast with stats
+            if (data.status === 'completed' && processed > 0) {
+              const elapsed = Math.round((Date.now() - (stats.startTime || Date.now())) / 1000);
+              const mins = Math.floor(elapsed / 60);
+              const secs = elapsed % 60;
+              const timeStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+              const manualMins = Math.ceil(processed * 15 / 60);
+              showToast(`Done! ${processed} images sorted into ${colors} colors in ${timeStr} (saved ~${manualMins} min vs manual)`, 'success');
+            } else if (data.status === 'cancelled') {
+              showToast(`Cancelled — ${processed} images already sorted`, 'info');
+            }
             // Save batch name if provided
             if (batchName.trim()) {
               window.electronAPI.renameHistory?.(0, batchName.trim()).catch(() => {});
