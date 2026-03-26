@@ -94,7 +94,7 @@ async function classifyWithClaude(imageBuffer) {
                         },
                         {
                             type: 'text',
-                            text: 'What is the BODY/PAINT color of the main car/vehicle in this motorsport photo? Ignore dust, smoke, shadows, and reflections — focus on the actual paint color. Reply with ONLY one word from this list: red, blue, green, yellow, orange, purple, pink, brown, black, white, silver-grey. Rules: If the car paint is white or cream, say "white". Only say "silver-grey" if the car is clearly metallic silver or grey paint. Teal/turquoise/cyan cars should be "blue". If multiple vehicles, classify the most prominent one. Reply with JUST the color word.',
+                            text: 'What is the BODY/PAINT color of the main car/vehicle in this motorsport/drag racing photo? CRITICAL: These photos often have heavy tire smoke, burnout haze, and dust — you MUST ignore all smoke and haze. Look through the smoke to identify the actual paint color underneath. Reply with ONLY one word from this list: red, blue, green, yellow, orange, purple, pink, brown, black, white, silver-grey. Rules: White cars surrounded by white/grey tire smoke are still "white" — do NOT say "silver-grey" just because of smoke. Only say "silver-grey" if the actual metallic paint is clearly silver or grey (not smoke-covered white). Teal/turquoise/cyan = "blue". If multiple vehicles, classify the most prominent one. Reply with JUST the color word.',
                         },
                     ],
                 }],
