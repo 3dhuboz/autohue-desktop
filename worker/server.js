@@ -67,7 +67,7 @@ function getActiveEngine() {
     return 'local';
 }
 
-console.log(`[config] Engine: ${getActiveEngine()}${OPENROUTER_KEY ? ' (model: ' + VISION_MODEL + ')' : ''}`);
+console.log(`[config] Engine: ${getActiveEngine()}`);
 
 // Listen for runtime updates from main process
 process.on('message', (msg) => {
@@ -276,13 +276,8 @@ function parseColorLines(rawText, expectedCount) {
 const OPENROUTER_BATCH_SIZE = 15;
 
 async function classifyBatchWithOpenRouter(imageBuffers) {
-    if (!OPENROUTER_KEY || imageBuffers.length === 0) {
-        try { fs.appendFileSync(path.join(STORAGE_ROOT, 'openrouter-debug.log'), new Date().toISOString() + ` SKIP: key=${!!OPENROUTER_KEY} images=${imageBuffers.length}\n`); } catch {}
-        return null;
-    }
+    if (!OPENROUTER_KEY || imageBuffers.length === 0) return null;
     try {
-        try { fs.appendFileSync(path.join(STORAGE_ROOT, 'openrouter-debug.log'), new Date().toISOString() + ` CALL: ${imageBuffers.length} images, sizes: ${imageBuffers.map(b=>b.length).join(',')}\n`); } catch {}
-        // Build OpenAI-compatible content array: images + text
         const content = [];
         for (const buf of imageBuffers) {
             content.push({
@@ -313,29 +308,20 @@ async function classifyBatchWithOpenRouter(imageBuffers) {
         });
 
         if (!res.ok) {
-            const errText = await res.text();
-            const errMsg = `[openrouter] API error ${res.status}: ${errText.slice(0, 200)}`;
-            console.error(errMsg);
-            try { fs.appendFileSync(path.join(STORAGE_ROOT, 'openrouter-debug.log'), new Date().toISOString() + ' ' + errMsg + '\n'); } catch {}
+            console.error(`[vision] API error ${res.status}`);
             return null;
         }
 
         const data = await res.json();
         const rawText = (data.choices?.[0]?.message?.content || '').trim();
-
-        // Debug log the raw response
-        try { fs.appendFileSync(path.join(STORAGE_ROOT, 'openrouter-debug.log'), new Date().toISOString() + ' RAW: ' + rawText + '\n'); } catch {}
-
         const results = parseColorLines(rawText, imageBuffers.length);
         results.forEach(r => { if (r) r.method = 'openrouter-batch'; });
 
         const validCount = results.filter(r => r !== null).length;
-        console.log(`  [openrouter] ${validCount}/${imageBuffers.length}: ${results.map(r => r?.category || '?').join(', ')}`);
+        console.log(`  [vision] ${validCount}/${imageBuffers.length}: ${results.map(r => r?.category || '?').join(', ')}`);
         return results;
     } catch (err) {
-        const errMsg = `[openrouter] Failed: ${err.message}`;
-        console.error(errMsg);
-        try { fs.appendFileSync(path.join(STORAGE_ROOT, 'openrouter-debug.log'), new Date().toISOString() + ' ' + errMsg + '\n'); } catch {}
+        console.error(`[vision] Failed: ${err.message}`);
         return null;
     }
 }
@@ -2575,7 +2561,7 @@ app.post('/test-openrouter', express.json(), async (req, res) => {
         }
         const d = await r.json();
         const reply = d.choices?.[0]?.message?.content || '';
-        res.json({ success: true, model: VISION_MODEL, reply });
+        res.json({ success: true, reply });
     } catch (err) {
         res.json({ success: false, error: err.message });
     }
