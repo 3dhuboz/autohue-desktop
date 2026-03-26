@@ -5,7 +5,7 @@ const fs = require('fs');
 class WorkerManager {
   constructor(storagePath) {
     this.process = null;
-    this.port = 3001;
+    this.port = 3099;
     this.storagePath = storagePath;
     this.restarting = false;
     this.claudeApiKey = null;
