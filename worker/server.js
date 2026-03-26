@@ -3,7 +3,8 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const Jimp = require('jimp');
-const sharp = require('sharp');
+let sharp;
+try { sharp = require('sharp'); } catch { sharp = null; console.warn('[config] sharp not available — using Jimp for resizing'); }
 const archiver = require('archiver');
 const crypto = require('crypto');
 const unzipper = require('unzipper');
@@ -219,11 +220,12 @@ async function prepareImageForClaude(imagePath) {
     if (isJpeg && fileStat.size < 10000000) {
         return fs.readFileSync(imagePath);
     }
-    // Only resize truly massive files (>5MB RAW exports, PNGs etc) — use sharp for speed
-    return sharp(imagePath)
-        .resize(800, null, { withoutEnlargement: true })
-        .jpeg({ quality: 70 })
-        .toBuffer();
+    // Only resize truly massive files (>5MB RAW exports, PNGs etc)
+    if (sharp) {
+        return sharp(imagePath).resize(800, null, { withoutEnlargement: true }).jpeg({ quality: 70 }).toBuffer();
+    }
+    const img = await Jimp.read(imagePath);
+    return img.clone().resize(Math.min(800, img.getWidth()), Jimp.AUTO).quality(70).getBufferAsync(Jimp.MIME_JPEG);
 }
 
 // ─── Nyckel API configuration (from environment variables) ───
@@ -1422,16 +1424,21 @@ async function analyzeImageColor(imagePath) {
     }
 }
 
-// ─── Generate a small thumbnail for live preview (sharp — ~10x faster than Jimp) ───
+// ─── Generate a small thumbnail for live preview (sharp if available, Jimp fallback) ───
 async function generateThumb(imagePath, sessionId, filename) {
     try {
         const thumbDir = path.join(THUMB_DIR, sessionId);
         fs.mkdirSync(thumbDir, { recursive: true });
         const thumbPath = path.join(thumbDir, filename.replace(/\.[^.]+$/, '.jpg'));
-        await sharp(imagePath)
-            .resize(120, null, { withoutEnlargement: true })
-            .jpeg({ quality: 70 })
-            .toFile(thumbPath);
+        if (sharp) {
+            await sharp(imagePath)
+                .resize(120, null, { withoutEnlargement: true })
+                .jpeg({ quality: 70 })
+                .toFile(thumbPath);
+        } else {
+            const image = await Jimp.read(imagePath);
+            await image.resize(120, Jimp.AUTO).quality(70).writeAsync(thumbPath);
+        }
         return `/thumbs/${sessionId}/${path.basename(thumbPath)}`;
     } catch (err) {
         console.error(`[thumb] Failed for ${filename}:`, err.message);

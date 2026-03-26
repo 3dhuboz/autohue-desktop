@@ -52,6 +52,26 @@ if (fs.existsSync(ortCommon)) {
   copyDirSync(ortCommon, path.join(distModules, 'onnxruntime-common'));
 }
 
+// Copy @img/sharp-* platform binaries (sharp's native libvips)
+const imgDir = path.join(ROOT, 'node_modules', '@img');
+if (fs.existsSync(imgDir)) {
+  const imgDest = path.join(distModules, '@img');
+  fs.mkdirSync(imgDest, { recursive: true });
+  for (const entry of fs.readdirSync(imgDir)) {
+    if (entry.startsWith('sharp-')) {
+      console.log(`[build-worker] Copying @img/${entry}`);
+      copyDirSync(path.join(imgDir, entry), path.join(imgDest, entry));
+    }
+  }
+}
+
+// Copy sharp's colour profiles (required at runtime)
+const sharpVendor = path.join(ROOT, 'node_modules', 'sharp', 'vendor');
+if (fs.existsSync(sharpVendor)) {
+  console.log('[build-worker] Copying sharp/vendor');
+  copyDirSync(sharpVendor, path.join(distModules, 'sharp', 'vendor'));
+}
+
 console.log('[build-worker] Done!');
 
 function copyDirSync(src, dest) {
