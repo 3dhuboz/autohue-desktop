@@ -44,7 +44,7 @@ function groupByDate(entries: HistoryEntry[]): { label: DateGroup; items: Histor
 const SWATCH: Record<string, string> = {
   red: '#ef4444', blue: '#3b82f6', green: '#22c55e', yellow: '#eab308',
   orange: '#f97316', purple: '#a855f7', pink: '#ec4899', brown: '#a16207',
-  black: '#334155', white: '#e2e8f0', 'silver-grey': '#94a3b8',
+  black: '#334155', white: '#ffffff', 'silver-grey': '#94a3b8',
 };
 
 // ─── Status accent colours ──────────────────────────────────────

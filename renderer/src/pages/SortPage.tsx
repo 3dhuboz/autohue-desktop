@@ -47,7 +47,7 @@ const COLOR_INFO: Record<string, { label: string; swatch: string; glow: string }
   'pink':        { label: 'Pink',        swatch: '#ec4899', glow: 'rgba(236,72,153,0.3)' },
   'brown':       { label: 'Brown',       swatch: '#a16207', glow: 'rgba(161,98,7,0.3)' },
   'black':       { label: 'Black',       swatch: '#334155', glow: 'rgba(51,65,85,0.3)' },
-  'white':       { label: 'White',       swatch: '#e2e8f0', glow: 'rgba(226,232,240,0.2)' },
+  'white':       { label: 'White',       swatch: '#ffffff', glow: 'rgba(255,255,255,0.3)' },
   'silver-grey': { label: 'Silver/Grey', swatch: '#94a3b8', glow: 'rgba(148,163,184,0.3)' },
   'unknown':     { label: 'Unknown',     swatch: '#f87171', glow: 'rgba(248,113,113,0.3)' },
   'please-double-check': { label: 'Needs Review', swatch: '#f59e0b', glow: 'rgba(245,158,11,0.3)' },
