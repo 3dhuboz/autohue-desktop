@@ -273,23 +273,96 @@ function parseColorLines(rawText, expectedCount) {
 }
 
 // ─── OpenRouter single-image classifier (1 image per call = maximum accuracy) ───
-const OPENROUTER_BATCH_SIZE = 3; // Process 3 images concurrently (separate API calls each)
+const OPENROUTER_BATCH_SIZE = 10; // 10 images per batch cycle (mix of batch calls + parallel)
 
 async function classifyBatchWithOpenRouter(imageBuffers) {
     if (!OPENROUTER_KEY || imageBuffers.length === 0) return null;
 
-    // Classify each image individually for maximum accuracy
-    const results = await Promise.all(imageBuffers.map(async (buf) => {
-        try {
-            return await classifySingleImage(buf);
-        } catch {
-            return null;
-        }
-    }));
+    // Split into mini-batches of 3 images each, run 3 mini-batches in parallel
+    // 3 images per API call = model can easily track order
+    // 3 parallel calls = 9 images per cycle per worker
+    const MINI_BATCH = 3;
+    const chunks = [];
+    for (let i = 0; i < imageBuffers.length; i += MINI_BATCH) {
+        chunks.push(imageBuffers.slice(i, i + MINI_BATCH));
+    }
 
+    // Run all chunks in parallel
+    const chunkResults = await Promise.all(chunks.map(chunk => classifyMiniBatch(chunk)));
+
+    // Flatten results back to match input order
+    const results = chunkResults.flat();
     const validCount = results.filter(r => r !== null).length;
     console.log(`  [vision] ${validCount}/${imageBuffers.length}: ${results.map(r => r?.category || '?').join(', ')}`);
     return results;
+}
+
+async function classifyMiniBatch(imageBuffers, retries = 3) {
+    if (!OPENROUTER_KEY || imageBuffers.length === 0) return imageBuffers.map(() => null);
+
+    // Single image? Use simple prompt
+    if (imageBuffers.length === 1) {
+        const result = await classifySingleImage(imageBuffers[0]);
+        return [result];
+    }
+
+    for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+        const content = [];
+        for (let i = 0; i < imageBuffers.length; i++) {
+            content.push({ type: 'text', text: `Photo ${i + 1}:` });
+            content.push({
+                type: 'image_url',
+                image_url: { url: `data:image/jpeg;base64,${imageBuffers[i].toString('base64')}` },
+            });
+        }
+        content.push({
+            type: 'text',
+            text: `${imageBuffers.length} photos above. For each, reply with the car's BODY PAINT color. ${imageBuffers.length} lines, one word each from: red, blue, green, yellow, orange, purple, pink, brown, black, white, silver-grey. IGNORE backgrounds. Dark charcoal/gunmetal = silver-grey. Gold/bronze = yellow.`,
+        });
+
+        const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${OPENROUTER_KEY}`,
+                'HTTP-Referer': 'https://autohue.app',
+                'X-Title': 'AutoHue',
+            },
+            body: JSON.stringify({
+                model: VISION_MODEL,
+                max_tokens: 50,
+                temperature: 0,
+                messages: [{ role: 'user', content }],
+            }),
+            signal: AbortSignal.timeout(20000),
+        });
+
+        if (!res.ok) {
+            if (res.status === 429 && attempt < retries - 1) {
+                await new Promise(r => setTimeout(r, (attempt + 1) * 3000));
+                continue;
+            }
+            // Batch failed — fall back to individual classification
+            console.warn(`[vision] Mini-batch failed (${res.status}), trying individually`);
+            return Promise.all(imageBuffers.map(buf => classifySingleImage(buf).catch(() => null)));
+        }
+
+        const data = await res.json();
+        const rawText = (data.choices?.[0]?.message?.content || '').trim();
+        const results = parseColorLines(rawText, imageBuffers.length);
+        results.forEach(r => { if (r) r.method = 'openrouter'; });
+        return results;
+    } catch (err) {
+        if (attempt < retries - 1) {
+            await new Promise(r => setTimeout(r, (attempt + 1) * 2000));
+            continue;
+        }
+        // Final fallback: classify individually
+        return Promise.all(imageBuffers.map(buf => classifySingleImage(buf).catch(() => null)));
+    }
+    }
+    return imageBuffers.map(() => null);
 }
 
 async function classifySingleImage(imageBuffer, retries = 3) {
