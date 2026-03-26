@@ -81,6 +81,8 @@ export default function HistoryPage() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [selectMode, setSelectMode] = useState(false);
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [browseFiles, setBrowseFiles] = useState<SessionFile[]>([]);
+  const [browseLoading, setBrowseLoading] = useState(false);
 
   useEffect(() => {
     window.electronAPI.getHistory()
@@ -163,12 +165,21 @@ export default function HistoryPage() {
     }
   };
 
-  const handleClickEntry = (entry: HistoryEntry) => {
+  const handleClickEntry = async (entry: HistoryEntry) => {
     if (selectMode) {
       toggleSelect(entry.id);
     } else {
-      // Expand/collapse to show details + open folder button
-      setExpandedId(prev => prev === entry.id ? null : entry.id);
+      const newId = expandedId === entry.id ? null : entry.id;
+      setExpandedId(newId);
+      if (newId && entry.session_id) {
+        setBrowseLoading(true);
+        setBrowseFiles([]);
+        try {
+          const files = await window.electronAPI.getSessionFiles(entry.session_id);
+          setBrowseFiles(files || []);
+        } catch { setBrowseFiles([]); }
+        setBrowseLoading(false);
+      }
     }
   };
 
@@ -495,6 +506,41 @@ export default function HistoryPage() {
                                 </div>
                               );
                             })}
+                          </div>
+                        )}
+
+                        {/* Browse images in this batch */}
+                        {browseLoading && (
+                          <div className="text-xs text-white/30 flex items-center gap-2 py-2">
+                            <SpinnerIcon size={12} /> Loading images...
+                          </div>
+                        )}
+                        {!browseLoading && browseFiles.length > 0 && (
+                          <div className="pt-2">
+                            <div className="text-[10px] text-white/30 font-bold uppercase tracking-wider mb-2">
+                              Browse Images ({browseFiles.length})
+                            </div>
+                            <div className="grid grid-cols-6 sm:grid-cols-8 lg:grid-cols-10 gap-1.5 max-h-[300px] overflow-y-auto pr-1">
+                              {browseFiles.map((f, idx) => {
+                                const hex = SWATCH[f.color] || '#666';
+                                return (
+                                  <div key={`${f.filename}-${idx}`} className="relative group cursor-pointer">
+                                    <div className="aspect-[4/3] rounded-md overflow-hidden bg-black/40 border border-white/5 group-hover:border-racing-500/40 transition-all">
+                                      <img
+                                        src={`file://${f.path.replace(/\\/g, '/')}`}
+                                        alt={f.filename}
+                                        className="w-full h-full object-cover"
+                                        loading="lazy"
+                                      />
+                                    </div>
+                                    <div className="absolute bottom-0 inset-x-0 flex items-center gap-0.5 px-1 py-0.5 bg-black/70 rounded-b-md">
+                                      <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: hex }} />
+                                      <span className="text-[6px] text-white/50 truncate">{f.color}</span>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
                           </div>
                         )}
 

@@ -94,7 +94,7 @@ async function classifyWithClaude(imageBuffer) {
                         },
                         {
                             type: 'text',
-                            text: 'What is the BODY/PAINT color of the main car/vehicle in this motorsport/drag racing photo? CRITICAL: These photos often have heavy tire smoke, burnout haze, and dust — you MUST ignore all smoke and haze. Look through the smoke to identify the actual paint color underneath. Reply with ONLY one word from this list: red, blue, green, yellow, orange, purple, pink, brown, black, white, silver-grey. Rules: White cars surrounded by white/grey tire smoke are still "white" — do NOT say "silver-grey" just because of smoke. Only say "silver-grey" if the actual metallic paint is clearly silver or grey (not smoke-covered white). Teal/turquoise/cyan = "blue". If multiple vehicles, classify the most prominent one. Reply with JUST the color word.',
+                            text: 'What is the BODY/PAINT color of the main car/vehicle in this motorsport/drag racing photo? CRITICAL RULES: 1) The car may be small in the frame surrounded by smoke — find it and focus ONLY on its paint color. 2) IGNORE all background elements: grass, dirt, sky, track surface, barriers, flags, buildings, spectators. 3) IGNORE smoke, haze, dust, and reflections. 4) White cars in smoke are "white" not "silver-grey". Only say "silver-grey" for actual metallic silver/grey paint. 5) Do NOT let warm grass/dirt trick you into saying "yellow" or "brown" — those are background, not the car. 6) Teal/turquoise/cyan = "blue". Reply with ONLY one word from: red, blue, green, yellow, orange, purple, pink, brown, black, white, silver-grey',
                         },
                     ],
                 }],
@@ -212,10 +212,10 @@ async function classifyBatchWithClaude(imageBuffers) {
 async function prepareImageForClaude(imagePath) {
     const fileStat = fs.statSync(imagePath);
     const isJpeg = /\.(jpg|jpeg)$/i.test(imagePath);
-    // Skip Jimp entirely for JPEGs under 5MB — send as-is
+    // Skip Jimp entirely for JPEGs under 10MB — send as-is
     // Claude handles large images fine, and skipping Jimp saves 3-5s per image
-    // Token cost difference is minimal (~$0.001 more per image)
-    if (isJpeg && fileStat.size < 5000000) {
+    // Token cost difference is minimal (~$0.002 more per image for larger files)
+    if (isJpeg && fileStat.size < 10000000) {
         return fs.readFileSync(imagePath);
     }
     // Only resize truly massive files (>5MB RAW exports, PNGs etc)

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useWorker } from '../hooks/useWorker';
+import WatermarkEditor from '../components/WatermarkEditor';
 import {
   KeyIcon,
   FolderIcon,
@@ -352,6 +353,9 @@ export default function SettingsPage({ license, onRefresh }: Props) {
           </div>
         )}
       </div>
+
+      {/* ─── Watermark Editor ─────────────────────────────────── */}
+      <WatermarkEditor />
 
       {/* ─── About ───────────────────────────────────────────── */}
       <div className="glass-card rounded-2xl p-6 space-y-4">
