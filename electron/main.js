@@ -331,9 +331,40 @@ ipcMain.handle('settings:getOpenRouterKey', () => {
   return { hasKey: !!(row && row.value) };
 });
 
+// ─── Sort Resume ───
+ipcMain.handle('sort:saveProgress', (_, sessionId, data) => {
+  try {
+    db.prepare(`
+      INSERT OR REPLACE INTO processing_history (session_id, image_count, color_counts, input_path, output_path, status, processed_files, total_count)
+      VALUES (?, ?, ?, ?, ?, 'in_progress', ?, ?)
+    `).run(sessionId, data.processed || 0, data.colorCounts ? JSON.stringify(data.colorCounts) : null,
+      data.inputPath || null, data.outputPath || null,
+      data.processedFiles ? JSON.stringify(data.processedFiles) : null, data.totalCount || 0);
+    return { success: true };
+  } catch (err) { return { success: false, error: err.message }; }
+});
+
+ipcMain.handle('sort:getIncomplete', () => {
+  try {
+    const rows = db.prepare("SELECT * FROM processing_history WHERE status = 'in_progress' ORDER BY created_at DESC LIMIT 5").all();
+    return rows.map(r => ({
+      ...r,
+      processedFiles: r.processed_files ? JSON.parse(r.processed_files) : [],
+      colorCounts: r.color_counts ? JSON.parse(r.color_counts) : {},
+    }));
+  } catch { return []; }
+});
+
+ipcMain.handle('sort:markComplete', (_, sessionId) => {
+  try {
+    db.prepare("UPDATE processing_history SET status = 'completed' WHERE session_id = ?").run(sessionId);
+    return true;
+  } catch { return false; }
+});
+
 // ─── History ───
 ipcMain.handle('history:list', () => {
-  return db.prepare('SELECT * FROM processing_history ORDER BY created_at DESC LIMIT 100').all();
+  return db.prepare("SELECT * FROM processing_history WHERE status != 'in_progress' ORDER BY created_at DESC LIMIT 100").all();
 });
 
 ipcMain.handle('history:delete', (_, id) => {

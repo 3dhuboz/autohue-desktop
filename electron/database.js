@@ -173,6 +173,11 @@ async function initDatabase(dbPath) {
   // Migrations — add columns to existing DBs
   try { db.prepare("SELECT name FROM processing_history LIMIT 1").get(); }
   catch { try { db.prepare("ALTER TABLE processing_history ADD COLUMN name TEXT").run(); } catch {} }
+  // v1.8.1: Add processed_files column for resume support
+  try { db.prepare("SELECT processed_files FROM processing_history LIMIT 1").get(); }
+  catch { try { db.prepare("ALTER TABLE processing_history ADD COLUMN processed_files TEXT").run(); } catch {} }
+  try { db.prepare("SELECT total_count FROM processing_history LIMIT 1").get(); }
+  catch { try { db.prepare("ALTER TABLE processing_history ADD COLUMN total_count INTEGER DEFAULT 0").run(); } catch {} }
 
   // Seed default settings
   const countRow = db.prepare('SELECT COUNT(*) as cnt FROM settings').get();

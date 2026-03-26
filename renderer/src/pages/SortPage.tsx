@@ -663,17 +663,17 @@ export default function SortPage() {
               <p className="text-white/30 text-sm mt-1">
                 {paused ? 'Processing is paused — you can navigate away safely' : 'AI is detecting cars and classifying colors'}
               </p>
-              {stats.results.length > 0 && (() => {
-                const lastMethod = (stats.results[stats.results.length - 1] as any)?.method || '';
-                const isApiEngine = lastMethod.includes('openrouter') || lastMethod.includes('gemini') || lastMethod.includes('claude') || stats.results.some((r: any) => r.confidence === 'high');
-                const engineLabel = lastMethod.includes('openrouter') ? 'Gemini Flash' : lastMethod.includes('gemini') ? 'Gemini Flash' : lastMethod.includes('claude') ? 'Claude Vision' : isApiEngine ? 'AI Vision Pro' : 'Local AI';
+              {(() => {
+                const engine = health?.visionEngine || 'local';
+                const isApiEngine = engine === 'openrouter' || engine === 'claude';
+                const engineLabel = engine === 'openrouter' ? 'Gemini Flash' : engine === 'claude' ? 'Claude Vision' : 'Local AI';
                 return (
                   <span className={`inline-flex items-center gap-1.5 mt-2 px-2.5 py-1 rounded-full text-[10px] font-bold ${
                     isApiEngine
-                      ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20'
+                      ? 'bg-green-500/10 text-green-400 border border-green-500/20'
                       : 'bg-white/5 text-white/30 border border-white/10'
                   }`}>
-                    <span className={`w-1.5 h-1.5 rounded-full ${isApiEngine ? 'bg-purple-400' : 'bg-white/30'}`} />
+                    <span className={`w-1.5 h-1.5 rounded-full ${isApiEngine ? 'bg-green-400 animate-pulse' : 'bg-white/30'}`} />
                     {engineLabel}
                   </span>
                 );
