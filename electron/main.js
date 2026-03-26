@@ -45,9 +45,11 @@ function createWindow() {
 
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
+    mainWindow.restore();
+    // Force window to front — NSIS installer can launch app in background
+    mainWindow.setAlwaysOnTop(true);
     mainWindow.focus();
-    // On first launch after install, ensure window is visible and not minimized
-    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.setAlwaysOnTop(false);
   });
 
   // Prevent window.open() from creating blank Electron windows (e.g. ZIP download)
