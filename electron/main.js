@@ -22,7 +22,7 @@ function createWindow() {
     minHeight: 600,
     icon: path.join(__dirname, '../build/icon.ico'),
     backgroundColor: '#09090b',
-    show: false,
+    show: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
@@ -45,19 +45,7 @@ function createWindow() {
 
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
-    if (mainWindow.isMinimized()) mainWindow.restore();
     mainWindow.focus();
-    // Force to front after NSIS installer — delay ensures installer window is gone
-    setTimeout(() => {
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.setAlwaysOnTop(true);
-        mainWindow.show();
-        mainWindow.focus();
-        setTimeout(() => {
-          if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setAlwaysOnTop(false);
-        }, 500);
-      }
-    }, 1000);
   });
 
   // Prevent window.open() from creating blank Electron windows (e.g. ZIP download)
