@@ -25,7 +25,6 @@ execSync([
   '--outfile=worker/dist/server.js',
   '--minify',                     // Protect IP: minify variable names + whitespace
   '--legal-comments=none',        // Strip all comments
-  '--mangle-props=_^_',           // Mangle private-looking properties
   '--external:onnxruntime-node',  // native .node binding
   '--external:node-unrar-js',     // native .node binding (wasm)
   '--external:sharp',             // native libvips binding
