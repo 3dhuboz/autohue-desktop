@@ -45,11 +45,19 @@ function createWindow() {
 
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
-    mainWindow.restore();
-    // Force window to front — NSIS installer can launch app in background
-    mainWindow.setAlwaysOnTop(true);
+    if (mainWindow.isMinimized()) mainWindow.restore();
     mainWindow.focus();
-    mainWindow.setAlwaysOnTop(false);
+    // Force to front after NSIS installer — delay ensures installer window is gone
+    setTimeout(() => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.setAlwaysOnTop(true);
+        mainWindow.show();
+        mainWindow.focus();
+        setTimeout(() => {
+          if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setAlwaysOnTop(false);
+        }, 500);
+      }
+    }, 1000);
   });
 
   // Prevent window.open() from creating blank Electron windows (e.g. ZIP download)

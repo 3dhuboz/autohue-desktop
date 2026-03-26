@@ -1938,7 +1938,7 @@ app.post('/upload', (req, res) => {
 
 // ─── Sort-local endpoint (process images from a local directory) ───
 app.post('/sort-local', async (req, res) => {
-    const { inputPath, outputPath } = req.body;
+    const { inputPath, outputPath, maxImages } = req.body;
 
     if (!inputPath) {
         return res.status(400).json({ error: 'inputPath is required' });
@@ -2071,8 +2071,15 @@ app.post('/sort-local', async (req, res) => {
                 const preReadCache = new Map();
 
                 function grabBatch(maxSize) {
+                    // Enforce daily quota limit
+                    if (session.maxImages && processedCount >= session.maxImages) {
+                        console.log(`[${sessionId}] Daily quota reached (${session.maxImages} images). Stopping.`);
+                        return [];
+                    }
+                    const remaining = session.maxImages ? session.maxImages - processedCount : Infinity;
+                    const limit = Math.min(maxSize, remaining);
                     const batch = [];
-                    while (batch.length < maxSize && pendingFiles.length > 0) {
+                    while (batch.length < limit && pendingFiles.length > 0) {
                         batch.push(pendingFiles.shift());
                     }
                     return batch;
@@ -2285,7 +2292,8 @@ app.post('/sort-local', async (req, res) => {
         results: [],
         colorCounts: {},
         inputPath,
-        outputPath: outputPath || null
+        outputPath: outputPath || null,
+        maxImages: maxImages || null, // Daily quota limit from license
     };
 
     // Start processing (non-blocking), reusing the same pipeline as /upload

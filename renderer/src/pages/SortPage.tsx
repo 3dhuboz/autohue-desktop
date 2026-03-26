@@ -180,19 +180,21 @@ export default function SortPage() {
     setError('');
     setUploading(true);
 
-    if (!folderPath && files.length > 0) {
-      const quota = await checkQuota(files.length);
-      if (!quota.allowed) {
-        setError(
-          quota.reason === 'daily_limit'
-            ? `Daily limit reached (${quota.remaining} remaining). Upgrade for more.`
-            : quota.reason === 'grace_expired'
-            ? 'License validation required. Connect to the internet and restart.'
-            : 'License issue. Check Settings.'
-        );
-        setUploading(false);
-        return;
-      }
+    // Check quota for ALL paths (files, folders, ZIPs)
+    const estimatedCount = files.length || 100; // For folders/ZIPs, estimate — worker enforces the real limit
+    const quota = await checkQuota(Math.min(estimatedCount, 1)); // Check if ANY processing is allowed
+    if (!quota.allowed) {
+      setError(
+        quota.reason === 'daily_limit'
+          ? `Daily limit reached (${quota.remaining} remaining). Upgrade for more.`
+          : quota.reason === 'grace_expired'
+          ? 'License validation required. Connect to the internet and restart.'
+          : quota.reason === 'expired'
+          ? 'Your trial has expired. Activate a license to continue.'
+          : 'License issue. Check Settings.'
+      );
+      setUploading(false);
+      return;
     }
 
     try {
@@ -208,11 +210,14 @@ export default function SortPage() {
         } catch { localPath = null; }
       }
 
+      // Pass the remaining daily quota so the worker stops at the limit
+      const maxImages = quota.remaining === -1 ? undefined : quota.remaining;
+
       if (localPath) {
         const res = await fetch(`${workerUrl}/sort-local`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ inputPath: localPath }),
+          body: JSON.stringify({ inputPath: localPath, maxImages }),
         });
         if (!res.ok) {
           const errData = await res.json().catch(() => null);
