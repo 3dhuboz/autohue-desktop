@@ -67,6 +67,18 @@ if (fs.existsSync(imgDir)) {
   }
 }
 
+// Copy sharp's runtime dependencies (detect-libc, semver, @img/colour)
+for (const dep of ['detect-libc', 'semver', '@img/colour']) {
+  // Check in sharp's own node_modules first, then root
+  const inSharp = path.join(ROOT, 'node_modules', 'sharp', 'node_modules', dep);
+  const inRoot = path.join(ROOT, 'node_modules', dep);
+  const src = fs.existsSync(inSharp) ? inSharp : fs.existsSync(inRoot) ? inRoot : null;
+  if (src) {
+    console.log(`[build-worker] Copying sharp dep: ${dep}`);
+    copyDirSync(src, path.join(distModules, dep));
+  }
+}
+
 // Copy sharp's colour profiles (required at runtime)
 const sharpVendor = path.join(ROOT, 'node_modules', 'sharp', 'vendor');
 if (fs.existsSync(sharpVendor)) {
