@@ -85,7 +85,7 @@ async function classifyWithClaude(imageBuffer) {
                 'anthropic-version': '2023-06-01',
             },
             body: JSON.stringify({
-                model: 'claude-sonnet-4-20250514',
+                model: 'claude-sonnet-4-5-20250514',
                 max_tokens: 30,
                 messages: [{
                     role: 'user',
@@ -164,7 +164,7 @@ async function classifyBatchWithClaude(imageBuffers) {
                 'anthropic-version': '2023-06-01',
             },
             body: JSON.stringify({
-                model: 'claude-sonnet-4-20250514',
+                model: 'claude-sonnet-4-5-20250514',
                 max_tokens: 100,
                 messages: [{ role: 'user', content }],
             }),
@@ -1914,8 +1914,8 @@ app.post('/sort-local', async (req, res) => {
                     if (session.status === 'cancelled') throw new Error('CANCELLED');
                 }
 
-                // ── BATCH + CONCURRENT PROCESSING: 2 workers × 6 images per batch = 12 images per cycle ──
-                const BATCH_CONCURRENCY = 2; // Number of parallel batch API calls
+                // ── BATCH + CONCURRENT PROCESSING: 3 workers × 6 images per batch = 18 images per cycle ──
+                const BATCH_CONCURRENCY = 3; // Number of parallel batch API calls
                 let cancelled = false;
                 // Pre-read cache: start reading next batch while current batch is classifying
                 const preReadCache = new Map(); // filePath → Promise<Buffer|null>
