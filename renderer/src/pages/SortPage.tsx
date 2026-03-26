@@ -99,6 +99,7 @@ export default function SortPage() {
   const [uploadProgress, setUploadProgress] = useState<{ percent: number; loaded: number; total: number; speed: number } | null>(null);
   const [expandedColor, setExpandedColor] = useState<string | null>(null);
   const [paused, setPaused] = useState(false);
+  const [extractionPhase, setExtractionPhase] = useState<{ active: boolean; extracted: number; total: number; currentFile: string }>({ active: false, extracted: 0, total: 0, currentFile: '' });
   const [stats, setStats] = useState<ProcessingStats>({
     processed: 0, total: 0, currentFile: '', startTime: 0,
     imagesPerSecond: 0, avgConfidence: 0, timeSavedSeconds: 0,
@@ -339,14 +340,24 @@ export default function SortPage() {
         }
 
         if (data.status === 'extracting') {
-          // Update extraction progress feedback
+          setExtractionPhase({
+            active: true,
+            extracted: data.extracted || data.processed || 0,
+            total: data.total || 0,
+            currentFile: data.current_file || 'Extracting...',
+          });
           setStats(prev => ({
             ...prev,
             total: data.total || 0,
             processed: data.processed || 0,
             currentFile: data.current_file || 'Extracting archive...',
           }));
-        } else if (data.status === 'paused') {
+        } else if (data.status === 'processing' && extractionPhase.active) {
+          // Transition from extraction to classification
+          setExtractionPhase(prev => ({ ...prev, active: false }));
+        }
+
+        if (data.status === 'paused') {
           setPaused(true);
         } else if (data.status === 'processing') {
           setPaused(false);
@@ -761,8 +772,74 @@ export default function SortPage() {
               </div>
             </div>
 
-            {/* Gauges */}
-            <div className="glass-card rounded-3xl p-6">
+            {/* ── Extraction Phase UI ── */}
+            {extractionPhase.active && stats.processed === 0 && (
+              <div className="glass-card rounded-3xl p-8 text-center animate-fade-up">
+                {/* Big animated archive icon */}
+                <div className="relative inline-flex items-center justify-center mb-6">
+                  <div className="w-24 h-24 rounded-2xl bg-gradient-to-br from-amber-500/20 to-orange-600/20 border border-amber-500/30 flex items-center justify-center" style={{ animation: 'pulse 2s ease-in-out infinite' }}>
+                    <svg viewBox="0 0 24 24" width={40} height={40} fill="none" stroke="currentColor" strokeWidth="1.5" className="text-amber-400">
+                      <path d="M21 8v13H3V8M1 3h22v5H1z" /><path d="M10 12h4" />
+                    </svg>
+                  </div>
+                  {/* Flying files animation */}
+                  {[0,1,2,3,4].map(i => (
+                    <div key={i} className="absolute w-3 h-4 rounded-sm bg-amber-400/40" style={{
+                      animation: `extract-fly 1.5s ease-out ${i * 0.3}s infinite`,
+                      top: '20%', left: '60%',
+                    }} />
+                  ))}
+                </div>
+
+                <h3 className="text-xl font-heading font-bold text-amber-400 mb-2">
+                  Unpacking Your Archive
+                </h3>
+                <p className="text-white/40 text-sm mb-1">
+                  {extractionPhase.total > 0
+                    ? `Found ${extractionPhase.total.toLocaleString()} images — extracting to temporary storage`
+                    : 'Scanning archive and extracting images...'
+                  }
+                </p>
+                <p className="text-white/20 text-xs mb-6">
+                  Larger files take longer to extract. Classification begins once extraction is complete.
+                </p>
+
+                {/* Big extraction progress */}
+                <div className="max-w-lg mx-auto mb-4">
+                  <div className="flex justify-between text-xs text-white/40 mb-2">
+                    <span>{extractionPhase.extracted.toLocaleString()} extracted</span>
+                    <span>{extractionPhase.total > 0 ? `${extractionPhase.total.toLocaleString()} total` : 'scanning...'}</span>
+                  </div>
+                  <div className="w-full h-3 bg-white/5 rounded-full overflow-hidden">
+                    <div
+                      className="h-full rounded-full transition-all duration-500 ease-out"
+                      style={{
+                        width: extractionPhase.total > 0 ? `${Math.min((extractionPhase.extracted / extractionPhase.total) * 100, 100)}%` : '30%',
+                        background: 'linear-gradient(90deg, #f59e0b, #f97316, #ef4444)',
+                        animation: extractionPhase.total === 0 ? 'indeterminate 2s ease-in-out infinite' : 'none',
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <p className="text-[10px] text-white/15 truncate max-w-md mx-auto">{extractionPhase.currentFile}</p>
+
+                <style>{`
+                  @keyframes extract-fly {
+                    0% { transform: translate(0, 0) rotate(0deg) scale(1); opacity: .6; }
+                    100% { transform: translate(40px, -60px) rotate(15deg) scale(0.3); opacity: 0; }
+                  }
+                  @keyframes indeterminate {
+                    0% { margin-left: 0; width: 30%; }
+                    50% { margin-left: 40%; width: 40%; }
+                    100% { margin-left: 70%; width: 30%; }
+                  }
+                `}</style>
+              </div>
+            )}
+
+            {/* Gauges — only show during classification (not extraction) */}
+            <div className={`glass-card rounded-3xl p-6 ${extractionPhase.active && stats.processed === 0 ? 'hidden' : ''}`}>
               <div className="grid grid-cols-3 lg:grid-cols-6 gap-4 items-start">
                 <TachoGauge value={speedPct} max={10} label="SPEED" unit="img/sec" displayValue={stats.imagesPerSecond.toFixed(1)} size={150} variant="red" redZoneStart={80} subtitle={stats.imagesPerSecond > 0 ? `~${(1/stats.imagesPerSecond).toFixed(1)}s each` : ''} />
                 <TachoGauge value={progressPct} max={100} label="PROGRESS" unit={`${stats.processed}/${stats.total}`} displayValue={`${progressPct}%`} size={150} variant="amber" redZoneStart={90} />
