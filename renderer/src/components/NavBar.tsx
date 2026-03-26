@@ -157,15 +157,19 @@ export default function NavBar({ page, setPage, license }: NavBarProps) {
             </span>
           </div>
 
-          {/* Upgrade link for trial users */}
-          {license.tier === 'trial' && (
+          {/* Upgrade/Buy Credits link — show for trial users OR when quota is low */}
+          {(license.tier === 'trial' || (hasQuota && usedPct > 70)) && (
             <button
               onClick={() => {
-                window.electronAPI?.openInExplorer?.('https://autohue.app/pricing');
+                window.electronAPI?.openInExplorer?.('https://autohue.app#pricing');
               }}
-              className="text-[10px] font-medium text-racing-400 hover:text-racing-300 transition-colors duration-200 underline underline-offset-2 decoration-racing-400/30 hover:decoration-racing-300/50"
+              className={`text-[10px] font-medium transition-colors duration-200 underline underline-offset-2 ${
+                usedPct > 90
+                  ? 'text-red-400 hover:text-red-300 decoration-red-400/30 animate-pulse'
+                  : 'text-racing-400 hover:text-racing-300 decoration-racing-400/30'
+              }`}
             >
-              Upgrade
+              {license.tier === 'trial' ? 'Upgrade' : usedPct > 90 ? 'Buy Credits' : 'Need More?'}
             </button>
           )}
 

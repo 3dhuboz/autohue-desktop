@@ -72,7 +72,7 @@ interface ProcessingStats {
 }
 
 export default function SortPage() {
-  const { license, checkQuota, recordUsage } = useLicense();
+  const { license, checkQuota, recordUsage, refresh: refreshLicense } = useLicense();
   const { workerUrl, ready: workerReady, health } = useWorker();
   const { showToast } = useToast();
 
@@ -109,6 +109,7 @@ export default function SortPage() {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const cursorRef = useRef(0);
   const completionRecorded = useRef(false);
+  const lastRecordedCount = useRef(0);
   const speedHistory = useRef<number[]>([]);
   const confHistory = useRef<number[]>([]);
   const mountedRef = useRef(true);
@@ -258,6 +259,7 @@ export default function SortPage() {
       setSessionId(data.session_id);
       cursorRef.current = 0;
       completionRecorded.current = false;
+      lastRecordedCount.current = 0;
       speedHistory.current = [];
       confHistory.current = [];
       setStats({
@@ -328,6 +330,12 @@ export default function SortPage() {
               colorCounts: counts,
             };
           });
+        }
+
+        // Incremental usage recording — every 20 images, update quota counter
+        if (processed > 0 && processed - lastRecordedCount.current >= 20) {
+          lastRecordedCount.current = processed;
+          recordUsage(sid, processed, data.color_counts || {}).then(() => refreshLicense()).catch(() => {});
         }
 
         if (data.status === 'extracting') {
