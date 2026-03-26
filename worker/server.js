@@ -87,7 +87,7 @@ process.on('message', (msg) => {
 const VALID_COLORS = new Set(['red','blue','green','yellow','orange','purple','pink','brown','black','white','silver-grey']);
 
 // Runtime string decode (IP protection)
-const _k = [0x61,0x48,0x37,0x23,0x6d,0x4b,0x39,0x24,0x70,0x4c,0x32,0x21,0x78,0x52,0x34];
+const _k = Buffer.from('614837236d4b392470    4c3221785234'.replace(/\s/g,''), 'hex');
 function _d(h){const b=Buffer.from(h,'hex');for(let i=0;i<b.length;i++)b[i]^=_k[i%_k.length];return b.toString('utf8');}
 
 async function classifyWithClaude(imageBuffer) {
