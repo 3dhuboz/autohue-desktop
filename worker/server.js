@@ -94,7 +94,7 @@ async function classifyWithClaude(imageBuffer) {
                         },
                         {
                             type: 'text',
-                            text: 'What is the main color of the car/vehicle in this motorsport photo? Reply with ONLY one word from this list: red, blue, green, yellow, orange, purple, pink, brown, black, white, silver-grey. If multiple vehicles, classify the most prominent one. Reply with just the color word, nothing else.',
+                            text: 'What is the BODY/PAINT color of the main car/vehicle in this motorsport photo? Ignore dust, smoke, shadows, and reflections — focus on the actual paint color. Reply with ONLY one word from this list: red, blue, green, yellow, orange, purple, pink, brown, black, white, silver-grey. Rules: If the car paint is white or cream, say "white". Only say "silver-grey" if the car is clearly metallic silver or grey paint. Teal/turquoise/cyan cars should be "blue". If multiple vehicles, classify the most prominent one. Reply with JUST the color word.',
                         },
                     ],
                 }],
@@ -1017,10 +1017,19 @@ async function analyzeImageColor(imagePath) {
         // than local LAB for tricky colors (white vs brown, silver vs grey etc.)
         if (CLAUDE_API_KEY) {
             try {
-                // Read and resize for Claude (keep it under 1MB for speed)
-                const img = await Jimp.read(imagePath);
-                const resized = img.clone().resize(Math.min(800, img.getWidth()), Jimp.AUTO).quality(75);
-                const jpegBuffer = await resized.getBufferAsync(Jimp.MIME_JPEG);
+                // Optimize: if file is already JPEG and under 1.5MB, send as-is (skip Jimp entirely)
+                const fileStat = fs.statSync(imagePath);
+                const isJpeg = /\.(jpg|jpeg)$/i.test(imagePath);
+                let jpegBuffer;
+                if (isJpeg && fileStat.size < 1500000) {
+                    // Small JPEG — read directly, no processing needed
+                    jpegBuffer = fs.readFileSync(imagePath);
+                } else {
+                    // Large file or non-JPEG — resize to 600px wide for speed
+                    const img = await Jimp.read(imagePath);
+                    const resized = img.clone().resize(Math.min(600, img.getWidth()), Jimp.AUTO).quality(65);
+                    jpegBuffer = await resized.getBufferAsync(Jimp.MIME_JPEG);
+                }
 
                 const claudeResult = await classifyWithClaude(jpegBuffer);
                 if (claudeResult) {

@@ -277,7 +277,7 @@ export default function SettingsPage({ license, onRefresh }: Props) {
               <span className="text-[11px] text-white/40 capitalize">{health.segformer || 'Loading\u2026'}</span>
             </div>
 
-            {/* Claude Vision */}
+            {/* AI Vision Pro */}
             <div className="h-px bg-white/[0.04]" />
 
             <div className="py-2 px-1">
@@ -288,10 +288,10 @@ export default function SettingsPage({ license, onRefresh }: Props) {
                     pulse={!!claudeStatus?.hasKey}
                   />
                   <div>
-                    <span className="text-xs text-white/70 font-heading font-bold block">Claude Vision</span>
+                    <span className="text-xs text-white/70 font-heading font-bold block">AI Vision Pro</span>
                     <span className="text-[10px] text-white/30">
                       {claudeStatus?.hasKey
-                        ? `Active (${claudeStatus.source === 'custom' ? 'your key' : 'platform key'}) — 3-5x faster`
+                        ? `Active — enhanced accuracy & speed`
                         : claudeStatus?.eligible
                         ? 'Available — configure to enable fast mode'
                         : 'Pro or Unlimited plan required'}

@@ -25,7 +25,10 @@ import {
   TrashIcon,
 } from '../components/Icons';
 
-const MANUAL_SECONDS_PER_IMAGE = 20;
+// Manual sorting estimate: photographer opens image, examines car, decides color,
+// navigates to correct folder, moves file, returns. Realistically 45-60s per image.
+const MANUAL_SECONDS_PER_IMAGE = 50;
+const PHOTOGRAPHER_HOURLY_RATE = 75; // USD — reasonable for motorsport photography
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -66,7 +69,7 @@ interface ProcessingStats {
 
 export default function SortPage() {
   const { license, checkQuota, recordUsage } = useLicense();
-  const { workerUrl, ready: workerReady } = useWorker();
+  const { workerUrl, ready: workerReady, health } = useWorker();
 
   const [phase, setPhase] = useState<Phase>('upload');
   const [files, setFiles] = useState<File[]>([]);
@@ -379,6 +382,14 @@ export default function SortPage() {
     : etaSeconds > 0 ? `${Math.round(etaSeconds)}s` : '--';
   const etaPct = stats.total > 0 ? Math.min((1 - remaining / stats.total) * 100, 100) : 0;
 
+  // Cost saved calculation — based on photographer hourly rate
+  const costSaved = (stats.timeSavedSeconds / 3600) * PHOTOGRAPHER_HOURLY_RATE;
+  const costSavedFormatted = costSaved >= 1 ? `$${costSaved.toFixed(0)}` : costSaved > 0 ? `$${costSaved.toFixed(2)}` : '$0';
+  // Project total cost saved for the full batch
+  const projectedTotalCostSaved = stats.total > 0 && stats.processed > 0
+    ? ((stats.total * MANUAL_SECONDS_PER_IMAGE) / 3600) * PHOTOGRAPHER_HOURLY_RATE
+    : 0;
+
   /* ── Pipeline step config (hardcoded Tailwind classes for JIT) ── */
   const pipelineSteps = [
     { icon: <UploadIcon size={18} />, label: 'Upload', sub: '', active: stats.processed > 0, done: stats.processed > 0, bgActive: 'bg-green-500/15', borderActive: 'border-green-500/30', textActive: 'text-green-400' },
@@ -615,9 +626,9 @@ export default function SortPage() {
                     : 'bg-white/5 text-white/30 border border-white/10'
                 }`}>
                   <span className={`w-1.5 h-1.5 rounded-full ${
-                    (stats.results[stats.results.length - 1] as any).method === 'claude-vision' ? 'bg-purple-400' : 'bg-white/30'
+                    health?.claudeVision === 'active' ? 'bg-purple-400' : 'bg-white/30'
                   }`} />
-                  {(stats.results[stats.results.length - 1] as any).method === 'claude-vision' ? 'Claude Vision' : 'Local AI'}
+                  {health?.claudeVision === 'active' ? 'AI Vision Pro' : 'Local AI'}
                 </span>
               )}
               <div className="flex items-center justify-center gap-3 mt-4">
@@ -658,7 +669,7 @@ export default function SortPage() {
                 <TachoGauge value={confPct} max={100} label="ACCURACY" unit="confidence" displayValue={confPct > 0 ? `${confPct.toFixed(0)}%` : '--'} size={150} variant="green" redZoneStart={95} />
                 <TachoGauge value={etaPct} max={100} label="ETA" unit="remaining" displayValue={etaFormatted} size={150} variant="blue" redZoneStart={95} subtitle={remaining > 0 ? `${remaining} left` : ''} />
                 <TachoGauge value={stats.timeSavedSeconds > 0 ? Math.min((stats.timeSavedSeconds / (stats.processed * MANUAL_SECONDS_PER_IMAGE)) * 100, 100) : 0} max={100} label="TIME SAVED" unit="vs manual" displayValue={timeSavedFormatted} size={150} variant="green" redZoneStart={95} subtitle={`Manual: ~${Math.round(stats.processed * MANUAL_SECONDS_PER_IMAGE / 60)}m`} />
-                <TachoGauge value={stats.total > 0 ? Math.min((stats.total / 500) * 100, 100) : 0} max={500} label="BATCH" unit="total images" displayValue={stats.total > 0 ? `${stats.total}` : '--'} size={150} variant="red" redZoneStart={80} subtitle={Object.keys(stats.colorCounts).length > 0 ? `${Object.keys(stats.colorCounts).length} colors found` : ''} />
+                <TachoGauge value={costSaved > 0 ? Math.min((costSaved / projectedTotalCostSaved) * 100, 100) : 0} max={100} label="COST SAVED" unit={`@ $${PHOTOGRAPHER_HOURLY_RATE}/hr`} displayValue={costSavedFormatted} size={150} variant="green" redZoneStart={95} subtitle={projectedTotalCostSaved > 0 ? `~$${projectedTotalCostSaved.toFixed(0)} total` : ''} />
               </div>
             </div>
 
