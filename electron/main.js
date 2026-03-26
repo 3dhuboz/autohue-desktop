@@ -109,18 +109,33 @@ app.whenReady().then(async () => {
   const openRouterKey = orKeyRow ? orKeyRow.value : null;
   const modelRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('vision_model');
   const visionModel = modelRow ? modelRow.value : 'google/gemini-2.5-flash';
+
+  // Debug log to file so we can see what's happening
+  const fs = require('fs');
+  const debugLogPath = path.join(app.getPath('userData'), 'debug-startup.log');
+  const debugLines = [
+    `[${new Date().toISOString()}] App startup`,
+    `openRouterKey: ${openRouterKey ? openRouterKey.slice(0, 15) + '... (len=' + openRouterKey.length + ')' : 'NULL'}`,
+    `claudeKey: ${claudeKey ? claudeKey.slice(0, 15) + '... (len=' + claudeKey.length + ')' : 'NULL'}`,
+    `visionModel: ${visionModel}`,
+    `orKeyRow raw: ${JSON.stringify(orKeyRow)}`,
+  ];
+  fs.writeFileSync(debugLogPath, debugLines.join('\n') + '\n', 'utf8');
+
   if (openRouterKey) console.log('[main] OpenRouter key available — high-speed classifier enabled');
   if (claudeKey) console.log(`[main] Claude Vision key available (${customKeyRow ? 'custom' : 'platform'})`);
 
   // 4. Start the AI worker process
   const storagePath = path.join(app.getPath('userData'), 'worker-data');
-  const fs = require('fs');
   fs.mkdirSync(storagePath, { recursive: true });
   // Write keyfiles so worker can read them directly
   const claudeKeyPath = path.join(storagePath, '.claude-key');
   const orKeyPath = path.join(storagePath, '.openrouter-key');
   if (claudeKey) { fs.writeFileSync(claudeKeyPath, claudeKey, 'utf8'); } else { try { fs.unlinkSync(claudeKeyPath); } catch {} }
   if (openRouterKey) { fs.writeFileSync(orKeyPath, openRouterKey, 'utf8'); } else { try { fs.unlinkSync(orKeyPath); } catch {} }
+
+  // Append worker env debug info
+  fs.appendFileSync(debugLogPath, `storagePath: ${storagePath}\norKeyPath: ${orKeyPath}\norKeyFileExists: ${fs.existsSync(orKeyPath)}\n`);
 
   workerManager = new WorkerManager(storagePath);
   if (claudeKey) workerManager.setClaudeApiKey(claudeKey);

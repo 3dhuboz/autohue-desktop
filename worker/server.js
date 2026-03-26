@@ -2491,6 +2491,38 @@ app.get('/health', (req, res) => {
     });
 });
 
+// ─── Test OpenRouter connectivity ───
+app.post('/test-openrouter', express.json(), async (req, res) => {
+    const key = req.body?.key || OPENROUTER_KEY;
+    if (!key) return res.json({ success: false, error: 'No API key provided' });
+    try {
+        const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${key}`,
+                'HTTP-Referer': 'https://autohue.app',
+                'X-Title': 'AutoHue',
+            },
+            body: JSON.stringify({
+                model: VISION_MODEL,
+                max_tokens: 5,
+                messages: [{ role: 'user', content: 'Say OK' }],
+            }),
+            signal: AbortSignal.timeout(10000),
+        });
+        if (!r.ok) {
+            const t = await r.text();
+            return res.json({ success: false, error: `${r.status}: ${t.slice(0, 100)}` });
+        }
+        const d = await r.json();
+        const reply = d.choices?.[0]?.message?.content || '';
+        res.json({ success: true, model: VISION_MODEL, reply });
+    } catch (err) {
+        res.json({ success: false, error: err.message });
+    }
+});
+
 // ─── Serve output images for browsing ───
 app.use('/output', express.static(OUTPUT_DIR));
 

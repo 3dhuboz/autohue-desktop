@@ -664,8 +664,8 @@ export default function SortPage() {
               </p>
               {stats.results.length > 0 && (() => {
                 const lastMethod = (stats.results[stats.results.length - 1] as any)?.method || '';
-                const isApiEngine = lastMethod.includes('gemini') || lastMethod.includes('claude') || stats.results.some((r: any) => r.confidence === 'high');
-                const engineLabel = lastMethod.includes('gemini') ? 'Gemini Flash' : lastMethod.includes('claude') ? 'Claude Vision' : isApiEngine ? 'AI Vision Pro' : 'Local AI';
+                const isApiEngine = lastMethod.includes('openrouter') || lastMethod.includes('gemini') || lastMethod.includes('claude') || stats.results.some((r: any) => r.confidence === 'high');
+                const engineLabel = lastMethod.includes('openrouter') ? 'Gemini Flash' : lastMethod.includes('gemini') ? 'Gemini Flash' : lastMethod.includes('claude') ? 'Claude Vision' : isApiEngine ? 'AI Vision Pro' : 'Local AI';
                 return (
                   <span className={`inline-flex items-center gap-1.5 mt-2 px-2.5 py-1 rounded-full text-[10px] font-bold ${
                     isApiEngine

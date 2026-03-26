@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useWorker } from '../hooks/useWorker';
+import { useToast } from '../components/Toast';
 import WatermarkEditor from '../components/WatermarkEditor';
 import {
   KeyIcon,
@@ -75,6 +76,7 @@ function Badge({ children }: { children: React.ReactNode }) {
 
 export default function SettingsPage({ license, onRefresh }: Props) {
   const { health, port, ready } = useWorker();
+  const { showToast } = useToast();
   const [version, setVersion] = useState('');
   const [userDataPath, setUserDataPath] = useState('');
   const [outputFolder, setOutputFolder] = useState('');
@@ -86,6 +88,7 @@ export default function SettingsPage({ license, onRefresh }: Props) {
   const [orStatus, setOrStatus] = useState<{ hasKey: boolean } | null>(null);
   const [showOrInput, setShowOrInput] = useState(false);
   const [orSaving, setOrSaving] = useState(false);
+  const [orTesting, setOrTesting] = useState(false);
 
   useEffect(() => {
     window.electronAPI.getVersion().then(setVersion);
@@ -327,25 +330,62 @@ export default function SettingsPage({ license, onRefresh }: Props) {
                         setOrSaving(false);
                         setShowOrInput(false);
                         setOrKey('');
+                        showToast('OpenRouter key saved — restart app to activate', 'success');
                       }}
-                      disabled={orSaving}
+                      disabled={orSaving || !orKey.trim()}
                       className="btn-racing px-4 py-2 rounded-lg text-xs shrink-0"
                     >
                       {orSaving ? 'Saving...' : 'Save'}
                     </button>
                   </div>
-                  {orStatus?.hasKey && (
+                  <div className="flex items-center gap-3">
                     <button
                       onClick={async () => {
-                        await window.electronAPI.setOpenRouterKey('');
-                        const status = await window.electronAPI.getOpenRouterKeyStatus();
-                        setOrStatus(status);
+                        const keyToTest = orKey.trim() || undefined;
+                        setOrTesting(true);
+                        try {
+                          const testKey = keyToTest || await window.electronAPI.getSetting('openrouter_raw_key');
+                          if (!testKey && !orStatus?.hasKey) {
+                            showToast('Enter an API key first', 'error');
+                            setOrTesting(false);
+                            return;
+                          }
+                          const port = await window.electronAPI.getWorkerPort();
+                          const res = await fetch(`http://localhost:${port}/test-openrouter`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            ...(keyToTest ? { body: JSON.stringify({ key: keyToTest }) } : {}),
+                          });
+                          const data = await res.json();
+                          if (data.success) {
+                            showToast(`Connected! Model: ${data.model}`, 'success');
+                          } else {
+                            showToast(`Connection failed: ${data.error}`, 'error');
+                          }
+                        } catch (err: any) {
+                          showToast(`Test failed: ${err.message}`, 'error');
+                        }
+                        setOrTesting(false);
                       }}
-                      className="text-[10px] text-white/30 hover:text-red-400 transition-colors"
+                      disabled={orTesting}
+                      className="text-[11px] text-cyan-400 hover:text-cyan-300 transition-colors"
                     >
-                      Remove OpenRouter key
+                      {orTesting ? 'Testing...' : '⚡ Test Connection'}
                     </button>
-                  )}
+                    {orStatus?.hasKey && (
+                      <button
+                        onClick={async () => {
+                          await window.electronAPI.setOpenRouterKey('');
+                          const status = await window.electronAPI.getOpenRouterKeyStatus();
+                          setOrStatus(status);
+                          showToast('OpenRouter key removed', 'info');
+                        }}
+                        className="text-[10px] text-white/30 hover:text-red-400 transition-colors"
+                      >
+                        Remove key
+                      </button>
+                    )}
+                  </div>
                 </div>
               )}
 
