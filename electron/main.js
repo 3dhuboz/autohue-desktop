@@ -143,9 +143,21 @@ app.whenReady().then(async () => {
 
   // 5b. System tray — keeps app running when window is closed
   try {
-    const iconPath = app.isPackaged
-      ? path.join(process.resourcesPath, 'app.asar', 'build', 'icon.png')
-      : path.join(__dirname, '..', 'build', 'icon.png');
+    // Try multiple icon paths — packaged vs dev, and different sizes
+    const iconCandidates = app.isPackaged
+      ? [
+          path.join(process.resourcesPath, 'app.asar', 'build', 'icon-16.png'),
+          path.join(process.resourcesPath, 'app.asar', 'build', 'icon.png'),
+          path.join(process.resourcesPath, 'build', 'icon.png'),
+          path.join(__dirname, '..', 'build', 'icon.png'),
+        ]
+      : [
+          path.join(__dirname, '..', 'build', 'icon-16.png'),
+          path.join(__dirname, '..', 'build', 'icon.png'),
+        ];
+    const fs2 = require('fs');
+    let iconPath = iconCandidates.find(p => fs2.existsSync(p)) || iconCandidates[0];
+    console.log(`[tray] Using icon: ${iconPath} (exists: ${fs2.existsSync(iconPath)})`);
     const trayIcon = nativeImage.createFromPath(iconPath).resize({ width: 16, height: 16 });
     tray = new Tray(trayIcon);
     tray.setToolTip('AutoHue — AI Car Photo Sorter');
