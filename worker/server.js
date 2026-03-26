@@ -273,7 +273,7 @@ function parseColorLines(rawText, expectedCount) {
 }
 
 // ─── OpenRouter single-image classifier (1 image per call = maximum accuracy) ───
-const OPENROUTER_BATCH_SIZE = 4; // Process 4 images concurrently (separate API calls each)
+const OPENROUTER_BATCH_SIZE = 3; // Process 3 images concurrently (separate API calls each)
 
 async function classifyBatchWithOpenRouter(imageBuffers) {
     if (!OPENROUTER_KEY || imageBuffers.length === 0) return null;
@@ -292,8 +292,9 @@ async function classifyBatchWithOpenRouter(imageBuffers) {
     return results;
 }
 
-async function classifySingleImage(imageBuffer) {
+async function classifySingleImage(imageBuffer, retries = 3) {
     if (!OPENROUTER_KEY) return null;
+    for (let attempt = 0; attempt < retries; attempt++) {
     try {
         const content = [
             {
@@ -325,6 +326,13 @@ async function classifySingleImage(imageBuffer) {
 
         if (!res.ok) {
             const errText = await res.text().catch(() => '');
+            // Rate limited — wait and retry
+            if (res.status === 429 && attempt < retries - 1) {
+                const wait = (attempt + 1) * 3000; // 3s, 6s, 9s
+                console.warn(`[vision] Rate limited (429). Waiting ${wait/1000}s before retry ${attempt + 2}/${retries}`);
+                await new Promise(r => setTimeout(r, wait));
+                continue;
+            }
             console.error(`[vision] API ${res.status}: ${errText.slice(0, 100)}`);
             return null;
         }
@@ -335,12 +343,20 @@ async function classifySingleImage(imageBuffer) {
         if (VALID_COLORS.has(mapped)) {
             return { category: mapped, confidence: 0.95, method: 'openrouter' };
         }
-        console.warn(`[vision] Unrecognized color: "${rawText}"`);
+        console.warn(`[vision] Unrecognized: "${rawText}"`);
         return null;
     } catch (err) {
-        console.error(`[vision] Failed: ${err.message}`);
+        if (attempt < retries - 1) {
+            const wait = (attempt + 1) * 2000;
+            console.warn(`[vision] Error: ${err.message}. Retry ${attempt + 2}/${retries} in ${wait/1000}s`);
+            await new Promise(r => setTimeout(r, wait));
+            continue;
+        }
+        console.error(`[vision] Failed after ${retries} attempts: ${err.message}`);
         return null;
     }
+    } // end retry loop
+    return null;
 }
 
 // ─── Unified batch dispatch ───
