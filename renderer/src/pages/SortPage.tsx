@@ -666,7 +666,7 @@ export default function SortPage() {
               {(() => {
                 const engine = health?.visionEngine || 'local';
                 const isApiEngine = engine === 'openrouter' || engine === 'claude';
-                const engineLabel = engine === 'openrouter' ? 'Gemini Flash' : engine === 'claude' ? 'Claude Vision' : 'Local AI';
+                const engineLabel = isApiEngine ? 'AI Vision Pro' : 'Local AI';
                 return (
                   <span className={`inline-flex items-center gap-1.5 mt-2 px-2.5 py-1 rounded-full text-[10px] font-bold ${
                     isApiEngine

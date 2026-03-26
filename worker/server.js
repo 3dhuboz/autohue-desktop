@@ -2534,14 +2534,10 @@ app.get('/health', (req, res) => {
         segModelPath: SEGFORMER_MODEL_PATH,
         segModelExists: fs.existsSync(SEGFORMER_MODEL_PATH),
         visionEngine: getActiveEngine(),
-        visionModel: VISION_MODEL,
-        openrouterKey: OPENROUTER_KEY ? 'set' : 'not set',
-        claudeKey: CLAUDE_API_KEY ? 'set' : 'not set',
+        apiKey: OPENROUTER_KEY ? 'set' : (CLAUDE_API_KEY ? 'set' : 'not set'),
         batchSize: getVisionBatchSize(),
-        pipeline: getActiveEngine() === 'openrouter'
-            ? `OpenRouter/${VISION_MODEL} (PRIMARY) → local LAB (fallback)`
-            : getActiveEngine() === 'claude'
-            ? 'Claude Vision (PRIMARY) → local LAB (fallback)'
+        pipeline: getActiveEngine() !== 'local'
+            ? 'AI Vision Pro (PRIMARY) → local LAB (fallback)'
             : segformerSession
                 ? 'SSD bbox → SegFormer pixel mask → pure vehicle pixels → Nyckel+LAB → merge'
                 : 'SSD bbox → multi-region crop → env filter → Nyckel+LAB → merge',

@@ -45,6 +45,22 @@ function createWindow() {
 
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
+    mainWindow.focus();
+    // On first launch after install, ensure window is visible and not minimized
+    if (mainWindow.isMinimized()) mainWindow.restore();
+  });
+
+  // Prevent window.open() from creating blank Electron windows (e.g. ZIP download)
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.includes('/download/') || url.startsWith('http')) {
+      // Use Electron's download manager for worker download URLs
+      if (url.includes('/download/')) {
+        mainWindow.webContents.downloadURL(url);
+      } else {
+        require('electron').shell.openExternal(url);
+      }
+    }
+    return { action: 'deny' }; // Never open new Electron windows
   });
 
   mainWindow.on('closed', () => {
