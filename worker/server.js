@@ -40,7 +40,7 @@ app.use(express.json());
 
 // ─── Vision API (OpenRouter — single key for all models) ───
 let OPENROUTER_KEY = process.env.OPENROUTER_KEY || '';
-let VISION_MODEL = process.env.VISION_MODEL || 'google/gemini-2.5-flash';
+let VISION_MODEL = process.env.VISION_MODEL || 'google/gemini-2.0-flash-001';
 
 // Fallback: read from keyfile
 if (!OPENROUTER_KEY) {

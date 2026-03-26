@@ -10,7 +10,7 @@ class WorkerManager {
     this.restarting = false;
     this.claudeApiKey = null;
     this.openRouterKey = null;
-    this.visionModel = 'google/gemini-2.5-flash';
+    this.visionModel = 'google/gemini-2.0-flash-001';
 
     // Ensure storage directories exist
     fs.mkdirSync(storagePath, { recursive: true });
@@ -34,7 +34,7 @@ class WorkerManager {
     }
   }
 
-  /** Set the vision model (e.g. google/gemini-2.5-flash). */
+  /** Set the vision model (e.g. google/gemini-2.0-flash-001). */
   setVisionModel(model) {
     this.visionModel = model;
     if (this.process) {
@@ -109,7 +109,7 @@ class WorkerManager {
         STORAGE_ROOT: this.storagePath,
         ...(claudeKey ? { CLAUDE_API_KEY: claudeKey } : {}),
         ...(orKey ? { OPENROUTER_KEY: orKey } : {}),
-        VISION_MODEL: this.visionModel || 'google/gemini-2.5-flash',
+        VISION_MODEL: this.visionModel || 'google/gemini-2.0-flash-001',
       },
       silent: true, // capture stdout/stderr
     });

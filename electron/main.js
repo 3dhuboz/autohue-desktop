@@ -135,7 +135,7 @@ app.whenReady().then(async () => {
   const orKeyRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('openrouter_api_key');
   const openRouterKey = orKeyRow ? orKeyRow.value : null;
   const modelRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('vision_model');
-  const visionModel = modelRow ? modelRow.value : 'google/gemini-2.5-flash';
+  const visionModel = modelRow ? modelRow.value : 'google/gemini-2.0-flash-001';
 
   const fs = require('fs');
 
