@@ -169,10 +169,10 @@ export default function NavBar({ page, setPage, license }: NavBarProps) {
             </button>
           )}
 
-          {/* Offline indicator */}
-          {license.offlineMode && (
+          {/* Offline indicator — only show when grace period is running low */}
+          {license.offlineMode && license.graceDaysLeft !== undefined && license.graceDaysLeft <= 3 && (
             <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-yellow-500/10 text-yellow-500 border border-yellow-500/20">
-              Offline
+              Offline ({license.graceDaysLeft}d left)
             </span>
           )}
         </div>

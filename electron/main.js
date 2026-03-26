@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, Tray, Menu, nativeImage } = require('electron');
 const path = require('path');
 const { initDatabase } = require('./database');
 const { LicenseManager } = require('./license');
@@ -6,6 +6,7 @@ const { WorkerManager } = require('./worker-manager');
 const { RulesSync } = require('./rules-sync');
 
 let mainWindow;
+let tray = null;
 let db;
 let licenseManager;
 let workerManager;
@@ -120,6 +121,24 @@ app.whenReady().then(async () => {
   // 5. Create window
   createWindow();
 
+  // 5b. System tray — keeps app running when window is closed
+  try {
+    const iconPath = app.isPackaged
+      ? path.join(process.resourcesPath, 'app.asar', 'build', 'icon.png')
+      : path.join(__dirname, '..', 'build', 'icon.png');
+    const trayIcon = nativeImage.createFromPath(iconPath).resize({ width: 16, height: 16 });
+    tray = new Tray(trayIcon);
+    tray.setToolTip('AutoHue — AI Car Photo Sorter');
+    tray.setContextMenu(Menu.buildFromTemplate([
+      { label: 'Open AutoHue', click: () => { if (mainWindow) { mainWindow.show(); mainWindow.focus(); } else createWindow(); } },
+      { type: 'separator' },
+      { label: 'Quit', click: () => { app.quit(); } },
+    ]));
+    tray.on('click', () => { if (mainWindow) { mainWindow.show(); mainWindow.focus(); } });
+  } catch (err) {
+    console.warn('[tray] Failed to create:', err.message);
+  }
+
   // 6. Check for updates (production only)
   if (!isDev) {
     try {
@@ -136,9 +155,11 @@ app.whenReady().then(async () => {
 });
 
 app.on('window-all-closed', () => {
-  if (rulesSync) rulesSync.stop();
-  if (workerManager) workerManager.stop();
-  if (process.platform !== 'darwin') app.quit();
+  // Don't quit — keep running in system tray for background sorting
+  // Worker keeps processing even without the window
+  if (process.platform === 'darwin') return; // macOS convention
+  // On Windows, keep alive if there's an active sort
+  mainWindow = null;
 });
 
 app.on('activate', () => {

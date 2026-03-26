@@ -212,13 +212,15 @@ async function classifyBatchWithClaude(imageBuffers) {
 async function prepareImageForClaude(imagePath) {
     const fileStat = fs.statSync(imagePath);
     const isJpeg = /\.(jpg|jpeg)$/i.test(imagePath);
-    // Skip Jimp entirely for JPEGs under 2MB — send as-is (saves 2-3s per image!)
-    if (isJpeg && fileStat.size < 2000000) {
+    // Skip Jimp entirely for JPEGs under 5MB — send as-is
+    // Claude handles large images fine, and skipping Jimp saves 3-5s per image
+    // Token cost difference is minimal (~$0.001 more per image)
+    if (isJpeg && fileStat.size < 5000000) {
         return fs.readFileSync(imagePath);
     }
-    // For large files, resize to 400px wide — Claude only needs to see the car color
+    // Only resize truly massive files (>5MB RAW exports, PNGs etc)
     const img = await Jimp.read(imagePath);
-    const resized = img.clone().resize(Math.min(400, img.getWidth()), Jimp.AUTO).quality(55);
+    const resized = img.clone().resize(Math.min(800, img.getWidth()), Jimp.AUTO).quality(70);
     return resized.getBufferAsync(Jimp.MIME_JPEG);
 }
 

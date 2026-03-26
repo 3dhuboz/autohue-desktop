@@ -9,6 +9,7 @@ import {
   AlertIcon,
   ImageIcon,
   FlagIcon,
+  DownloadIcon,
 } from '../components/Icons';
 
 // ─── Date grouping helpers ──────────────────────────────────────
@@ -74,7 +75,7 @@ const HISTORY_RETENTION_DAYS = 14; // Auto-hide sorts older than this
 export default function HistoryPage() {
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [loading, setLoading] = useState(true);
-  const { workerUrl } = useWorker();
+  const { workerUrl, port } = useWorker();
   const [activeSession, setActiveSession] = useState<{ sid: string; status: string; processed: number; total: number; currentFile: string } | null>(null);
   const activePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
@@ -463,7 +464,16 @@ export default function HistoryPage() {
                               }}
                               className="text-[11px] px-3 py-1.5 rounded-lg bg-racing-500/10 text-racing-400 border border-racing-500/20 hover:bg-racing-500/20 transition-all flex items-center gap-1.5"
                             >
-                              <FolderIcon size={12} /> Open Sorted Folder
+                              <FolderIcon size={12} /> Open Folder
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                window.open(`http://localhost:${port}/download/${entry.session_id}`, '_blank');
+                              }}
+                              className="text-[11px] px-3 py-1.5 rounded-lg bg-green-500/10 text-green-400 border border-green-500/20 hover:bg-green-500/20 transition-all flex items-center gap-1.5"
+                            >
+                              <DownloadIcon size={12} /> Download ZIP
                             </button>
                           </div>
                         </div>
