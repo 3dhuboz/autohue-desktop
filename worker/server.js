@@ -135,6 +135,91 @@ async function classifyWithClaude(imageBuffer) {
     }
 }
 
+// ─── Batch classify multiple images in ONE API call (3-4x faster) ───
+const BATCH_SIZE = 4;
+
+async function classifyBatchWithClaude(imageBuffers) {
+    if (!CLAUDE_API_KEY || imageBuffers.length === 0) return null;
+    try {
+        // Build content array: image1, image2, ..., imageN, text prompt
+        const content = [];
+        for (let i = 0; i < imageBuffers.length; i++) {
+            content.push({
+                type: 'image',
+                source: { type: 'base64', media_type: 'image/jpeg', data: imageBuffers[i].toString('base64') },
+            });
+        }
+        content.push({
+            type: 'text',
+            text: `There are ${imageBuffers.length} motorsport/drag racing photos above (numbered 1 to ${imageBuffers.length} in order). For EACH photo, identify the BODY/PAINT color of the main car/vehicle. CRITICAL: Ignore tire smoke, burnout haze, dust, and reflections — focus on the actual paint color. White cars in smoke are still "white". Only say "silver-grey" for actual metallic silver/grey paint. Teal/turquoise/cyan = "blue". Reply with EXACTLY ${imageBuffers.length} color words, one per line, in order. Each line must be ONE word from: red, blue, green, yellow, orange, purple, pink, brown, black, white, silver-grey`,
+        });
+
+        const res = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'x-api-key': CLAUDE_API_KEY,
+                'anthropic-version': '2023-06-01',
+            },
+            body: JSON.stringify({
+                model: 'claude-sonnet-4-20250514',
+                max_tokens: 100,
+                messages: [{ role: 'user', content }],
+            }),
+            signal: AbortSignal.timeout(30000),
+        });
+
+        if (!res.ok) {
+            const errText = await res.text();
+            console.error(`[claude-batch] API error ${res.status}: ${errText.slice(0, 200)}`);
+            return null;
+        }
+
+        const data = await res.json();
+        const rawText = (data.content?.[0]?.text || '').trim();
+        const lines = rawText.split(/\n/).map(l => l.trim().toLowerCase().replace(/[^a-z-]/g, '').replace(/^\d+\.?\s*/, ''));
+
+        const colorMap = {
+            'silver': 'silver-grey', 'grey': 'silver-grey', 'gray': 'silver-grey',
+            'silvergrey': 'silver-grey', 'silvergray': 'silver-grey',
+            'maroon': 'red', 'burgundy': 'red', 'crimson': 'red',
+            'navy': 'blue', 'teal': 'blue', 'cyan': 'blue', 'turquoise': 'blue',
+            'gold': 'yellow', 'cream': 'white', 'ivory': 'white', 'beige': 'white',
+            'olive': 'green', 'lime': 'green', 'magenta': 'pink', 'tan': 'brown',
+        };
+
+        const results = [];
+        for (let i = 0; i < imageBuffers.length; i++) {
+            const raw = lines[i] || '';
+            const mapped = colorMap[raw] || raw;
+            if (VALID_COLORS.has(mapped)) {
+                results.push({ category: mapped, confidence: 0.95, method: 'claude-vision-batch' });
+            } else {
+                results.push(null); // fallback for this image
+            }
+        }
+
+        const validCount = results.filter(r => r !== null).length;
+        console.log(`  [claude-batch] ${validCount}/${imageBuffers.length} classified: ${results.map(r => r?.category || '?').join(', ')}`);
+        return results;
+    } catch (err) {
+        console.error(`[claude-batch] Failed: ${err.message}`);
+        return null;
+    }
+}
+
+// ─── Prepare image buffer for Claude (shared by single + batch) ───
+async function prepareImageForClaude(imagePath) {
+    const fileStat = fs.statSync(imagePath);
+    const isJpeg = /\.(jpg|jpeg)$/i.test(imagePath);
+    if (isJpeg && fileStat.size < 1500000) {
+        return fs.readFileSync(imagePath);
+    }
+    const img = await Jimp.read(imagePath);
+    const resized = img.clone().resize(Math.min(600, img.getWidth()), Jimp.AUTO).quality(65);
+    return resized.getBufferAsync(Jimp.MIME_JPEG);
+}
+
 // ─── Nyckel API configuration (from environment variables) ───
 const NYCKEL_CLIENT_ID = process.env.NYCKEL_CLIENT_ID || '';
 const NYCKEL_CLIENT_SECRET = process.env.NYCKEL_CLIENT_SECRET || '';
@@ -1013,38 +1098,22 @@ function classifyPixelsLAB(pixels) {
 async function analyzeImageColor(imagePath) {
     try {
         // ═══ FAST PATH: Claude Vision (Pro/Unlimited tiers) ═══
-        // When available, Claude Vision is the PRIMARY classifier — much more accurate
-        // than local LAB for tricky colors (white vs brown, silver vs grey etc.)
-        if (CLAUDE_API_KEY) {
+        // For single-image calls (non-batch). Batch mode bypasses this entirely.
+        if (CLAUDE_API_KEY && !imagePath._batchResult) {
             try {
-                // Optimize: if file is already JPEG and under 1.5MB, send as-is (skip Jimp entirely)
-                const fileStat = fs.statSync(imagePath);
-                const isJpeg = /\.(jpg|jpeg)$/i.test(imagePath);
-                let jpegBuffer;
-                if (isJpeg && fileStat.size < 1500000) {
-                    // Small JPEG — read directly, no processing needed
-                    jpegBuffer = fs.readFileSync(imagePath);
-                } else {
-                    // Large file or non-JPEG — resize to 600px wide for speed
-                    const img = await Jimp.read(imagePath);
-                    const resized = img.clone().resize(Math.min(600, img.getWidth()), Jimp.AUTO).quality(65);
-                    jpegBuffer = await resized.getBufferAsync(Jimp.MIME_JPEG);
-                }
-
+                const jpegBuffer = await prepareImageForClaude(imagePath);
                 const claudeResult = await classifyWithClaude(jpegBuffer);
                 if (claudeResult) {
-                    // Claude Vision succeeded — return immediately (skip heavy pipeline)
                     return {
-                        rgb: [128, 128, 128], // placeholder — Claude doesn't return RGB
+                        rgb: [128, 128, 128],
                         category: claudeResult.category,
                         hex: '#808080',
                         confidence: 'high',
                         aiDetected: true,
                         segmented: false,
-                        method: 'claude-vision',
+                        method: claudeResult.method || 'claude-vision',
                     };
                 }
-                // Claude Vision failed — fall through to local pipeline
                 console.log('  [claude] Vision failed, falling back to local pipeline');
             } catch (err) {
                 console.warn('  [claude] Vision error, falling back:', err.message);
@@ -1830,68 +1899,114 @@ app.post('/sort-local', async (req, res) => {
                     if (session.status === 'cancelled') throw new Error('CANCELLED');
                 }
 
-                // ── CONCURRENT PROCESSING: 3 parallel workers for ~3x speed ──
-                const CONCURRENCY = 3;
+                // ── BATCH + CONCURRENT PROCESSING: 2 workers × 4 images per batch = 8 images per cycle ──
+                const BATCH_CONCURRENCY = 2; // Number of parallel batch API calls
                 let cancelled = false;
 
-                async function processOneFile(filePath) {
-                    await waitIfPaused();
-                    if (cancelled) return;
-                    const file = path.basename(filePath);
-
-                    const colorInfo = await analyzeImageColor(filePath);
-                    const thumbUrl = await generateThumb(filePath, sessionId, `${processedCount}_${file}`);
-
-                    const needsReview = colorInfo.category === 'unknown' || colorInfo.confidence === 'none' || colorInfo.confidence === 'very-low';
-                    const folderName = needsReview ? 'please-double-check' : colorInfo.category;
-
-                    const colorFolder = path.join(outputDir, folderName);
-                    fs.mkdirSync(colorFolder, { recursive: true });
-                    let destName = file;
-                    let counter = 1;
-                    while (fs.existsSync(path.join(colorFolder, destName))) {
-                        const ext = path.extname(file);
-                        destName = `${path.basename(file, ext)}_${counter}${ext}`;
-                        counter++;
+                function grabBatch(maxSize) {
+                    const batch = [];
+                    while (batch.length < maxSize && pendingFiles.length > 0) {
+                        batch.push(pendingFiles.shift());
                     }
-                    fs.copyFileSync(filePath, path.join(colorFolder, destName));
+                    return batch;
+                }
 
-                    // Thread-safe update (Node.js single-threaded event loop)
-                    processedCount++;
-                    session.colorCounts[folderName] = (session.colorCounts[folderName] || 0) + 1;
-                    session.currentFile = file;
-                    session.processed = processedCount;
+                async function processBatch(batchFiles, workerIdx) {
+                    if (batchFiles.length === 0) return;
+                    await waitIfPaused();
+                    if (cancelled || session.status === 'cancelled') { cancelled = true; return; }
 
-                    session.results.push({
-                        filename: file, color: folderName, hex: colorInfo.hex, rgb: colorInfo.rgb,
-                        thumb: thumbUrl, confidence: colorInfo.confidence || 'unknown',
-                        needsReview, status: needsReview ? 'Needs Review' : 'Success'
-                    });
+                    // Prepare all images for Claude in parallel
+                    const buffers = await Promise.all(
+                        batchFiles.map(fp => prepareImageForClaude(fp).catch(() => null))
+                    );
+                    const validIndices = buffers.map((b, i) => b ? i : -1).filter(i => i >= 0);
+                    const validBuffers = validIndices.map(i => buffers[i]);
 
-                    if (processedCount % 10 === 0) {
-                        console.log(`[${sessionId}] Processed ${processedCount}/${extractedCount} (${pendingFiles.length} queued, ${CONCURRENCY} concurrent)`);
+                    // Batch classify with Claude Vision
+                    let batchResults = null;
+                    if (CLAUDE_API_KEY && validBuffers.length > 0) {
+                        batchResults = await classifyBatchWithClaude(validBuffers);
+                    }
+
+                    // Process each file in the batch
+                    for (let bi = 0; bi < batchFiles.length; bi++) {
+                        if (cancelled || session.status === 'cancelled') { cancelled = true; return; }
+                        const filePath = batchFiles[bi];
+                        const file = path.basename(filePath);
+
+                        try {
+                            let colorInfo;
+                            const validIdx = validIndices.indexOf(bi);
+                            if (batchResults && validIdx >= 0 && batchResults[validIdx]) {
+                                // Use batch result
+                                colorInfo = {
+                                    rgb: [128, 128, 128],
+                                    category: batchResults[validIdx].category,
+                                    hex: '#808080',
+                                    confidence: 'high',
+                                    method: 'claude-vision-batch',
+                                };
+                            } else {
+                                // Fallback to single-image analysis
+                                colorInfo = await analyzeImageColor(filePath);
+                            }
+
+                            const thumbUrl = await generateThumb(filePath, sessionId, `${processedCount}_${file}`);
+
+                            const needsReview = colorInfo.category === 'unknown' || colorInfo.confidence === 'none' || colorInfo.confidence === 'very-low';
+                            const folderName = needsReview ? 'please-double-check' : colorInfo.category;
+
+                            const colorFolder = path.join(outputDir, folderName);
+                            fs.mkdirSync(colorFolder, { recursive: true });
+                            let destName = file;
+                            let counter = 1;
+                            while (fs.existsSync(path.join(colorFolder, destName))) {
+                                const ext = path.extname(file);
+                                destName = `${path.basename(file, ext)}_${counter}${ext}`;
+                                counter++;
+                            }
+                            fs.copyFileSync(filePath, path.join(colorFolder, destName));
+
+                            processedCount++;
+                            session.colorCounts[folderName] = (session.colorCounts[folderName] || 0) + 1;
+                            session.currentFile = file;
+                            session.processed = processedCount;
+
+                            session.results.push({
+                                filename: file, color: folderName, hex: colorInfo.hex, rgb: colorInfo.rgb,
+                                thumb: thumbUrl, confidence: colorInfo.confidence || 'unknown',
+                                needsReview, status: needsReview ? 'Needs Review' : 'Success'
+                            });
+                        } catch (err) {
+                            console.error(`[${sessionId}][w${workerIdx}] Failed ${file}: ${err.message}`);
+                            processedCount++;
+                            session.processed = processedCount;
+                        }
+                    }
+
+                    if (processedCount % 8 === 0) {
+                        console.log(`[${sessionId}] Processed ${processedCount}/${extractedCount} (${pendingFiles.length} queued, batch mode)`);
                     }
                 }
 
-                // Run N concurrent workers pulling from the shared queue
-                const workers = Array.from({ length: CONCURRENCY }, async (_, workerIdx) => {
+                // Run N concurrent batch workers
+                const workers = Array.from({ length: BATCH_CONCURRENCY }, async (_, workerIdx) => {
                     while (!extractionDone || pendingFiles.length > 0) {
                         if (cancelled || session.status === 'cancelled') { cancelled = true; return; }
                         if (pendingFiles.length === 0) {
-                            await new Promise(r => setTimeout(r, 150));
+                            await new Promise(r => setTimeout(r, 200));
                             continue;
                         }
 
-                        const filePath = pendingFiles.shift();
-                        if (!filePath) continue;
+                        const batch = grabBatch(BATCH_SIZE);
+                        if (batch.length === 0) continue;
 
                         try {
-                            await processOneFile(filePath);
+                            await processBatch(batch, workerIdx);
                         } catch (err) {
                             if (err.message === 'CANCELLED') { cancelled = true; return; }
-                            console.error(`[${sessionId}][w${workerIdx}] Failed: ${path.basename(filePath)}: ${err.message}`);
-                            processedCount++;
-                            session.processed = processedCount;
+                            console.error(`[${sessionId}][w${workerIdx}] Batch error: ${err.message}`);
                         }
                     }
                 });
