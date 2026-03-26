@@ -74,7 +74,8 @@
     "nsis": {
       "oneClick": true,
       "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
+      "createStartMenuShortcut": true,
+      "deleteAppDataOnUninstall": false
     },
     "publish": {
       "provider": "github",
