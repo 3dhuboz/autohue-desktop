@@ -28,6 +28,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // History
   getHistory: () => ipcRenderer.invoke('history:list'),
   deleteHistory: (id) => ipcRenderer.invoke('history:delete', id),
+  renameHistory: (id, name) => ipcRenderer.invoke('history:rename', id, name),
+  getOutputPath: (sessionId) => ipcRenderer.invoke('history:getOutputPath', sessionId),
+  getSessionFiles: (sessionId) => ipcRenderer.invoke('history:getSessionFiles', sessionId),
 
   // Worker
   getWorkerHealth: () => ipcRenderer.invoke('worker:health'),

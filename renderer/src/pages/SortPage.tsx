@@ -25,10 +25,12 @@ import {
   TrashIcon,
 } from '../components/Icons';
 
-// Manual sorting estimate: photographer opens image, examines car, decides color,
-// navigates to correct folder, moves file, returns. Realistically 45-60s per image.
-const MANUAL_SECONDS_PER_IMAGE = 50;
-const PHOTOGRAPHER_HOURLY_RATE = 75; // USD — reasonable for motorsport photography
+// Manual sorting estimate: photographer opens each large RAW/JPG, waits for it to load,
+// examines the car through smoke/dust, decides color category, navigates to correct folder,
+// drags/moves file, returns to source folder, repeats. For motorsport photos with smoke
+// and multiple cars, this takes 60-90s per image including decision fatigue.
+const MANUAL_SECONDS_PER_IMAGE = 75;
+const PHOTOGRAPHER_HOURLY_RATE = 85; // USD — professional motorsport photography rate
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -75,6 +77,7 @@ export default function SortPage() {
   const [files, setFiles] = useState<File[]>([]);
   const [folderPath, setFolderPath] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState('');
+  const [batchName, setBatchName] = useState('');
   const [error, setError] = useState('');
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<{ percent: number; loaded: number; total: number; speed: number } | null>(null);
@@ -333,6 +336,15 @@ export default function SortPage() {
             const processed = data.processed || 0;
             const colorCounts = data.color_counts || {};
             recordUsage(sid, processed, colorCounts).catch(console.error);
+            // Save batch name if provided
+            if (batchName.trim()) {
+              window.electronAPI.renameHistory?.(0, batchName.trim()).catch(() => {});
+              // Also try by looking up the history entry
+              window.electronAPI.getHistory?.().then(hist => {
+                const entry = hist.find((h: HistoryEntry) => h.session_id === sid);
+                if (entry) window.electronAPI.renameHistory?.(entry.id, batchName.trim());
+              }).catch(() => {});
+            }
           }
         }
       } catch (e) {
@@ -565,6 +577,16 @@ export default function SortPage() {
                   )}
                 </div>
                 <div className="flex flex-col items-center gap-4">
+                  {/* Batch name input */}
+                  <div className="w-full max-w-md">
+                    <input
+                      type="text"
+                      value={batchName}
+                      onChange={e => setBatchName(e.target.value)}
+                      placeholder="Name this batch (e.g. Powercruise Feb Friday)"
+                      className="w-full bg-white/[0.03] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white/70 placeholder:text-white/20 focus:outline-none focus:border-racing-500/40 transition-colors"
+                    />
+                  </div>
                   <button
                     onClick={startProcessing}
                     disabled={uploading || !workerReady}

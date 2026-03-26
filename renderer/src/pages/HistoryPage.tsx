@@ -372,7 +372,10 @@ export default function HistoryPage() {
                         {/* Info */}
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 mb-1">
-                            <span className="text-sm font-heading font-bold text-white/80">
+                            {entry.name && (
+                              <span className="text-sm font-heading font-bold text-white/90">{entry.name} —</span>
+                            )}
+                            <span className={`text-sm font-heading font-bold ${entry.name ? 'text-white/50' : 'text-white/80'}`}>
                               {entry.image_count} image{entry.image_count !== 1 ? 's' : ''}
                             </span>
                             <span className={`inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded font-bold ${badge.bg} ${badge.text}`}>
@@ -452,14 +455,16 @@ export default function HistoryPage() {
                             <span className="text-white/60 font-bold">{colorKeys.length}</span> color folders
                           </div>
                           <div className="flex gap-2">
-                            {entry.output_path && (
-                              <button
-                                onClick={(e) => { e.stopPropagation(); handleOpenFolder(entry.output_path); }}
-                                className="text-[11px] px-3 py-1.5 rounded-lg bg-racing-500/10 text-racing-400 border border-racing-500/20 hover:bg-racing-500/20 transition-all flex items-center gap-1.5"
-                              >
-                                <FolderIcon size={12} /> Open Sorted Folder
-                              </button>
-                            )}
+                            <button
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                const outputPath = entry.output_path || await window.electronAPI.getOutputPath?.(entry.session_id);
+                                if (outputPath) handleOpenFolder(outputPath);
+                              }}
+                              className="text-[11px] px-3 py-1.5 rounded-lg bg-racing-500/10 text-racing-400 border border-racing-500/20 hover:bg-racing-500/20 transition-all flex items-center gap-1.5"
+                            >
+                              <FolderIcon size={12} /> Open Sorted Folder
+                            </button>
                           </div>
                         </div>
 

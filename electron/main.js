@@ -249,6 +249,33 @@ ipcMain.handle('history:delete', (_, id) => {
   return true;
 });
 
+ipcMain.handle('history:rename', (_, id, name) => {
+  db.prepare('UPDATE processing_history SET name = ? WHERE id = ?').run(name, id);
+  return true;
+});
+
+ipcMain.handle('history:getOutputPath', (_, sessionId) => {
+  const storagePath = path.join(app.getPath('userData'), 'worker-data', 'output', sessionId);
+  const fs = require('fs');
+  return fs.existsSync(storagePath) ? storagePath : null;
+});
+
+ipcMain.handle('history:getSessionFiles', (_, sessionId) => {
+  const fs = require('fs');
+  const outputDir = path.join(app.getPath('userData'), 'worker-data', 'output', sessionId);
+  if (!fs.existsSync(outputDir)) return [];
+  const result = [];
+  for (const colorDir of fs.readdirSync(outputDir, { withFileTypes: true })) {
+    if (!colorDir.isDirectory()) continue;
+    const colorPath = path.join(outputDir, colorDir.name);
+    const files = fs.readdirSync(colorPath).filter(f => /\.(jpg|jpeg|png|webp|gif|bmp)$/i.test(f));
+    for (const file of files) {
+      result.push({ color: colorDir.name, filename: file, path: path.join(colorPath, file) });
+    }
+  }
+  return result;
+});
+
 // ─── Worker ───
 ipcMain.handle('worker:health', async () => {
   return workerManager ? workerManager.checkHealth() : { status: 'not_started' };

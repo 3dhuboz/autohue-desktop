@@ -154,6 +154,7 @@ async function initDatabase(dbPath) {
     CREATE TABLE IF NOT EXISTS processing_history (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       session_id TEXT NOT NULL UNIQUE,
+      name TEXT,
       image_count INTEGER NOT NULL DEFAULT 0,
       color_counts TEXT,
       input_path TEXT,
@@ -168,6 +169,10 @@ async function initDatabase(dbPath) {
       value TEXT NOT NULL
     );
   `);
+
+  // Migrations — add columns to existing DBs
+  try { db.prepare("SELECT name FROM processing_history LIMIT 1").get(); }
+  catch { try { db.prepare("ALTER TABLE processing_history ADD COLUMN name TEXT").run(); } catch {} }
 
   // Seed default settings
   const countRow = db.prepare('SELECT COUNT(*) as cnt FROM settings').get();

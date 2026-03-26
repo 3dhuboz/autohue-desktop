@@ -23,6 +23,9 @@ interface ElectronAPI {
   // History
   getHistory: () => Promise<HistoryEntry[]>;
   deleteHistory: (id: number) => Promise<boolean>;
+  renameHistory: (id: number, name: string) => Promise<boolean>;
+  getOutputPath: (sessionId: string) => Promise<string | null>;
+  getSessionFiles: (sessionId: string) => Promise<SessionFile[]>;
 
   // Worker
   getWorkerHealth: () => Promise<WorkerHealth>;
@@ -71,6 +74,7 @@ interface QuotaCheck {
 interface HistoryEntry {
   id: number;
   session_id: string;
+  name: string | null;
   image_count: number;
   color_counts: string | null;
   input_path: string | null;
@@ -78,6 +82,12 @@ interface HistoryEntry {
   duration_seconds: number | null;
   status: string;
   created_at: string;
+}
+
+interface SessionFile {
+  color: string;
+  filename: string;
+  path: string;
 }
 
 interface ClaudeKeyStatus {
