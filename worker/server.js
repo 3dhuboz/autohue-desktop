@@ -272,23 +272,39 @@ function parseColorLines(rawText, expectedCount) {
     return results;
 }
 
-// ─── OpenRouter batch classifier (OpenAI-compatible, any model) ───
-const OPENROUTER_BATCH_SIZE = 15;
+// ─── OpenRouter single-image classifier (1 image per call = maximum accuracy) ───
+const OPENROUTER_BATCH_SIZE = 4; // Process 4 images concurrently (separate API calls each)
 
 async function classifyBatchWithOpenRouter(imageBuffers) {
     if (!OPENROUTER_KEY || imageBuffers.length === 0) return null;
-    try {
-        const content = [];
-        for (const buf of imageBuffers) {
-            content.push({
-                type: 'image_url',
-                image_url: { url: `data:image/jpeg;base64,${buf.toString('base64')}` },
-            });
+
+    // Classify each image individually for maximum accuracy
+    const results = await Promise.all(imageBuffers.map(async (buf) => {
+        try {
+            return await classifySingleImage(buf);
+        } catch {
+            return null;
         }
-        content.push({
-            type: 'text',
-            text: `There are ${imageBuffers.length} motorsport/drag racing photos above (numbered 1 to ${imageBuffers.length}). For EACH photo, identify the BODY/PAINT color of the main car/vehicle. Reply with EXACTLY ${imageBuffers.length} lines. Each line = just ONE color word from: red, blue, green, yellow, orange, purple, pink, brown, black, white, silver-grey. RULES: 1) IGNORE smoke, dirt, grass, sky — only the car body paint. 2) Dark charcoal, gunmetal, dark grey = "silver-grey" NOT "blue". 3) Only say "blue" for clearly bright/vivid blue paint. 4) Teal/turquoise/cyan = "blue". 5) White cars in smoke = "white" not "silver-grey".`,
-        });
+    }));
+
+    const validCount = results.filter(r => r !== null).length;
+    console.log(`  [vision] ${validCount}/${imageBuffers.length}: ${results.map(r => r?.category || '?').join(', ')}`);
+    return results;
+}
+
+async function classifySingleImage(imageBuffer) {
+    if (!OPENROUTER_KEY) return null;
+    try {
+        const content = [
+            {
+                type: 'image_url',
+                image_url: { url: `data:image/jpeg;base64,${imageBuffer.toString('base64')}` },
+            },
+            {
+                type: 'text',
+                text: 'What is the BODY/PAINT color of the main car/vehicle in this photo? Reply with ONLY one word from: red, blue, green, yellow, orange, purple, pink, brown, black, white, silver-grey. RULES: Focus ONLY on the car body paint. IGNORE smoke, asphalt, sky, grass, barriers. Dark charcoal/gunmetal = silver-grey. Gold/bronze metallic = yellow.',
+            },
+        ];
 
         const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
             method: 'POST',
@@ -300,26 +316,27 @@ async function classifyBatchWithOpenRouter(imageBuffers) {
             },
             body: JSON.stringify({
                 model: VISION_MODEL,
-                max_tokens: 200,
+                max_tokens: 20,
                 temperature: 0,
                 messages: [{ role: 'user', content }],
             }),
-            signal: AbortSignal.timeout(25000),
+            signal: AbortSignal.timeout(15000),
         });
 
         if (!res.ok) {
-            console.error(`[vision] API error ${res.status}`);
+            const errText = await res.text().catch(() => '');
+            console.error(`[vision] API ${res.status}: ${errText.slice(0, 100)}`);
             return null;
         }
 
         const data = await res.json();
-        const rawText = (data.choices?.[0]?.message?.content || '').trim();
-        const results = parseColorLines(rawText, imageBuffers.length);
-        results.forEach(r => { if (r) r.method = 'openrouter-batch'; });
-
-        const validCount = results.filter(r => r !== null).length;
-        console.log(`  [vision] ${validCount}/${imageBuffers.length}: ${results.map(r => r?.category || '?').join(', ')}`);
-        return results;
+        const rawText = (data.choices?.[0]?.message?.content || '').trim().toLowerCase().replace(/[^a-z-]/g, '');
+        const mapped = COLOR_MAP[rawText] || rawText;
+        if (VALID_COLORS.has(mapped)) {
+            return { category: mapped, confidence: 0.95, method: 'openrouter' };
+        }
+        console.warn(`[vision] Unrecognized color: "${rawText}"`);
+        return null;
     } catch (err) {
         console.error(`[vision] Failed: ${err.message}`);
         return null;
