@@ -2042,7 +2042,6 @@ app.post('/sort-local', async (req, res) => {
                 console.log(`[${sessionId}] Engine: ${activeEngine}, batch: ${activeBatchSize}, concurrency: ${BATCH_CONCURRENCY}`);
                 let cancelled = false;
                 const preReadCache = new Map();
-                const pendingThumbs = []; // Generate thumbs async after classification
 
                 function grabBatch(maxSize) {
                     const batch = [];
@@ -2108,10 +2107,7 @@ app.post('/sort-local', async (req, res) => {
                                 colorInfo = await analyzeImageColor(filePath);
                             }
 
-                            // Fire-and-forget thumbnail — don't block classification
-                            const thumbIdx = processedCount;
-                            const thumbPromise = generateThumb(filePath, sessionId, `${thumbIdx}_${file}`).catch(() => null);
-                            pendingThumbs.push({ promise: thumbPromise, idx: thumbIdx });
+                            const thumbUrl = await generateThumb(filePath, sessionId, `${processedCount}_${file}`);
 
                             const needsReview = colorInfo.category === 'unknown' || colorInfo.confidence === 'none' || colorInfo.confidence === 'very-low';
                             const folderName = needsReview ? 'please-double-check' : colorInfo.category;
@@ -2132,17 +2128,10 @@ app.post('/sort-local', async (req, res) => {
                             session.currentFile = file;
                             session.processed = processedCount;
 
-                            // Resolve thumb asynchronously — UI can show placeholder until ready
-                            thumbPromise.then(thumbUrl => {
-                                const result = session.results.find(r => r.filename === file && r._thumbIdx === thumbIdx);
-                                if (result) result.thumb = thumbUrl;
-                            });
-
                             session.results.push({
                                 filename: file, color: folderName, hex: colorInfo.hex, rgb: colorInfo.rgb,
-                                thumb: null, confidence: colorInfo.confidence || 'unknown',
-                                needsReview, status: needsReview ? 'Needs Review' : 'Success',
-                                _thumbIdx: thumbIdx,
+                                thumb: thumbUrl, confidence: colorInfo.confidence || 'unknown',
+                                needsReview, status: needsReview ? 'Needs Review' : 'Success'
                             });
                         } catch (err) {
                             console.error(`[${sessionId}][w${workerIdx}] Failed ${file}: ${err.message}`);
@@ -2181,11 +2170,6 @@ app.post('/sort-local', async (req, res) => {
 
                 // Wait for extraction to fully complete (should already be done)
                 await extractionPromise;
-
-                // Wait for any remaining thumbnails to finish (non-blocking during classification)
-                if (pendingThumbs.length > 0) {
-                    await Promise.allSettled(pendingThumbs.map(t => t.promise));
-                }
 
                 session.status = 'completed';
                 session.currentFile = '';
