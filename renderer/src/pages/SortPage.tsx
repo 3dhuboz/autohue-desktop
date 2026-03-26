@@ -779,6 +779,7 @@ export default function SortPage() {
                 }))}
                 isProcessing={phase === 'sorting'}
                 totalProcessed={stats.processed}
+                totalImages={stats.total}
               />
             </div>
 

@@ -11,6 +11,7 @@ interface SortAnimationProps {
   results: SortResult[];
   isProcessing: boolean;
   totalProcessed?: number;
+  totalImages?: number;
 }
 
 // ── Color lookup ──
@@ -31,7 +32,7 @@ const COLOR_LABELS: Record<string, string> = {
 // ── Animation phases — FAST to match real processing speed ──
 type AnimPhase = 'enter' | 'analyze' | 'result' | 'exit' | 'idle';
 
-export default function SortAnimation({ results, isProcessing, totalProcessed }: SortAnimationProps) {
+export default function SortAnimation({ results, isProcessing, totalProcessed, totalImages }: SortAnimationProps) {
   const [queue, setQueue] = useState<SortResult[]>([]);
   const [current, setCurrent] = useState<SortResult | null>(null);
   const [phase, setPhase] = useState<AnimPhase>('idle');
@@ -128,16 +129,19 @@ export default function SortAnimation({ results, isProcessing, totalProcessed }:
           backgroundImage: 'repeating-linear-gradient(90deg, rgba(255,255,255,0.06) 0, rgba(255,255,255,0.06) 4px, transparent 4px, transparent 12px)',
         }} />
 
-        {/* LEFT: Source */}
-        <div className="absolute left-2 top-1/2 -translate-y-1/2 flex flex-col items-center gap-1.5">
-          <div className="w-9 h-9 rounded-lg border border-dashed border-white/10 flex items-center justify-center">
+        {/* LEFT: Remaining */}
+        <div className="absolute left-2 top-1/2 -translate-y-1/2 flex flex-col items-center gap-1">
+          <div className="w-10 h-10 rounded-lg border border-dashed border-white/10 flex items-center justify-center bg-white/[0.02]">
             <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-white/20">
               <rect x="2" y="2" width="12" height="12" rx="2" />
               <circle cx="5.5" cy="5.5" r="1.5" fill="currentColor" fillOpacity=".3" />
               <path d="M2 11L5 8L7 10L10 6L14 11" />
             </svg>
           </div>
-          <span className="text-[8px] text-white/20 tracking-widest uppercase">Input</span>
+          {totalImages && totalProcessed !== undefined && (
+            <span className="text-[11px] text-orange-400/80 font-bold tabular-nums">{Math.max(0, (totalImages || 0) - (totalProcessed || 0))}</span>
+          )}
+          <span className="text-[7px] text-white/20 tracking-widest uppercase">Remaining</span>
         </div>
 
         {/* CENTER: AutoHue Brain */}
@@ -208,18 +212,16 @@ export default function SortAnimation({ results, isProcessing, totalProcessed }:
         </div>
 
         {/* RIGHT: Sorted folder */}
-        <div className="absolute right-2 top-1/2 -translate-y-1/2 flex flex-col items-center gap-1.5">
-          <div className="w-9 h-9 rounded-lg border border-white/10 flex items-center justify-center bg-white/[0.02]" style={{
+        <div className="absolute right-2 top-1/2 -translate-y-1/2 flex flex-col items-center gap-1">
+          <div className="w-10 h-10 rounded-lg border border-white/10 flex items-center justify-center bg-white/[0.02]" style={{
             animation: phase === 'exit' ? `ah-folder-bump ${speed.exit}ms ease-out` : 'none',
           }}>
             <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-green-400/50">
               <path d="M2 4.5C2 3.67 2.67 3 3.5 3H6L7.5 5H12.5C13.33 5 14 5.67 14 6.5V11.5C14 12.33 13.33 13 12.5 13H3.5C2.67 13 2 12.33 2 11.5V4.5Z" />
             </svg>
           </div>
-          <span className="text-[8px] text-white/20 tracking-widest uppercase">Sorted</span>
-          {(totalProcessed ?? completed.length) > 0 && (
-            <span className="text-[10px] text-green-400/70 font-bold tabular-nums">{totalProcessed ?? completed.length}</span>
-          )}
+          <span className="text-[11px] text-green-400/80 font-bold tabular-nums">{totalProcessed ?? completed.length}</span>
+          <span className="text-[7px] text-white/20 tracking-widest uppercase">Sorted</span>
         </div>
 
         {/* ── Animated thumbnail sliding across ── */}
