@@ -1489,21 +1489,40 @@ async function processSessionFiles(sessionId, files) {
         }
     }
 
-    try {
-        console.log(`[${sessionId}] Processing ${files.length} images`);
-        for (let i = 0; i < files.length; i++) {
-            await processOneImage(files[i], i);
+    // Concurrent processing — 3 parallel workers
+    const CONCURRENCY = 3;
+    let fileIdx = 0;
+    let cancelled = false;
+
+    const workers = Array.from({ length: CONCURRENCY }, async (_, wIdx) => {
+        while (fileIdx < files.length && !cancelled) {
+            const idx = fileIdx++;
+            if (idx >= files.length) break;
+            try {
+                await processOneImage(files[idx], idx);
+            } catch (err) {
+                if (err.message === 'CANCELLED') { cancelled = true; return; }
+                console.error(`[${sessionId}][w${wIdx}] Failed: ${err.message}`);
+                completedCount++;
+                session.processed = completedCount;
+            }
         }
-        session.status = 'completed';
-        session.currentFile = '';
-        console.log(`[${sessionId}] Complete! ${files.length} images sorted.`);
-    } catch (err) {
-        if (err.message === 'CANCELLED') {
+    });
+
+    try {
+        console.log(`[${sessionId}] Processing ${files.length} images (${CONCURRENCY}x concurrent)`);
+        await Promise.all(workers);
+        if (!cancelled) {
+            session.status = 'completed';
+            session.currentFile = '';
+            console.log(`[${sessionId}] Complete! ${files.length} images sorted.`);
+        } else {
             session.currentFile = '';
             console.log(`[${sessionId}] Cancelled after ${completedCount}/${files.length} images.`);
-        } else {
-            throw err;
         }
+    } catch (err) {
+        session.currentFile = '';
+        console.log(`[${sessionId}] Error: ${err.message}`);
     }
 }
 
@@ -1811,56 +1830,73 @@ app.post('/sort-local', async (req, res) => {
                     if (session.status === 'cancelled') throw new Error('CANCELLED');
                 }
 
-                while (!extractionDone || pendingFiles.length > 0) {
-                    if (pendingFiles.length === 0) {
-                        // No files ready yet — wait briefly
-                        await new Promise(r => setTimeout(r, 200));
-                        continue;
-                    }
+                // ── CONCURRENT PROCESSING: 3 parallel workers for ~3x speed ──
+                const CONCURRENCY = 3;
+                let cancelled = false;
 
+                async function processOneFile(filePath) {
                     await waitIfPaused();
-                    const filePath = pendingFiles.shift();
+                    if (cancelled) return;
                     const file = path.basename(filePath);
 
-                    try {
-                        const colorInfo = await analyzeImageColor(filePath);
-                        const thumbUrl = await generateThumb(filePath, sessionId, `${processedCount}_${file}`);
+                    const colorInfo = await analyzeImageColor(filePath);
+                    const thumbUrl = await generateThumb(filePath, sessionId, `${processedCount}_${file}`);
 
-                        const needsReview = colorInfo.category === 'unknown' || colorInfo.confidence === 'none' || colorInfo.confidence === 'very-low';
-                        const folderName = needsReview ? 'please-double-check' : colorInfo.category;
+                    const needsReview = colorInfo.category === 'unknown' || colorInfo.confidence === 'none' || colorInfo.confidence === 'very-low';
+                    const folderName = needsReview ? 'please-double-check' : colorInfo.category;
 
-                        const colorFolder = path.join(outputDir, folderName);
-                        fs.mkdirSync(colorFolder, { recursive: true });
-                        let destName = file;
-                        let counter = 1;
-                        while (fs.existsSync(path.join(colorFolder, destName))) {
-                            const ext = path.extname(file);
-                            destName = `${path.basename(file, ext)}_${counter}${ext}`;
-                            counter++;
-                        }
-                        fs.copyFileSync(filePath, path.join(colorFolder, destName));
+                    const colorFolder = path.join(outputDir, folderName);
+                    fs.mkdirSync(colorFolder, { recursive: true });
+                    let destName = file;
+                    let counter = 1;
+                    while (fs.existsSync(path.join(colorFolder, destName))) {
+                        const ext = path.extname(file);
+                        destName = `${path.basename(file, ext)}_${counter}${ext}`;
+                        counter++;
+                    }
+                    fs.copyFileSync(filePath, path.join(colorFolder, destName));
 
-                        processedCount++;
-                        session.colorCounts[folderName] = (session.colorCounts[folderName] || 0) + 1;
-                        session.currentFile = file;
-                        session.processed = processedCount;
+                    // Thread-safe update (Node.js single-threaded event loop)
+                    processedCount++;
+                    session.colorCounts[folderName] = (session.colorCounts[folderName] || 0) + 1;
+                    session.currentFile = file;
+                    session.processed = processedCount;
 
-                        session.results.push({
-                            filename: file, color: folderName, hex: colorInfo.hex, rgb: colorInfo.rgb,
-                            thumb: thumbUrl, confidence: colorInfo.confidence || 'unknown',
-                            needsReview, status: needsReview ? 'Needs Review' : 'Success'
-                        });
+                    session.results.push({
+                        filename: file, color: folderName, hex: colorInfo.hex, rgb: colorInfo.rgb,
+                        thumb: thumbUrl, confidence: colorInfo.confidence || 'unknown',
+                        needsReview, status: needsReview ? 'Needs Review' : 'Success'
+                    });
 
-                        if (processedCount % 10 === 0) {
-                            console.log(`[${sessionId}] Processed ${processedCount}/${extractedCount} (${pendingFiles.length} queued)`);
-                        }
-                    } catch (err) {
-                        if (err.message === 'CANCELLED') throw err;
-                        console.error(`[${sessionId}] Failed to process ${file}:`, err.message);
-                        processedCount++;
-                        session.processed = processedCount;
+                    if (processedCount % 10 === 0) {
+                        console.log(`[${sessionId}] Processed ${processedCount}/${extractedCount} (${pendingFiles.length} queued, ${CONCURRENCY} concurrent)`);
                     }
                 }
+
+                // Run N concurrent workers pulling from the shared queue
+                const workers = Array.from({ length: CONCURRENCY }, async (_, workerIdx) => {
+                    while (!extractionDone || pendingFiles.length > 0) {
+                        if (cancelled || session.status === 'cancelled') { cancelled = true; return; }
+                        if (pendingFiles.length === 0) {
+                            await new Promise(r => setTimeout(r, 150));
+                            continue;
+                        }
+
+                        const filePath = pendingFiles.shift();
+                        if (!filePath) continue;
+
+                        try {
+                            await processOneFile(filePath);
+                        } catch (err) {
+                            if (err.message === 'CANCELLED') { cancelled = true; return; }
+                            console.error(`[${sessionId}][w${workerIdx}] Failed: ${path.basename(filePath)}: ${err.message}`);
+                            processedCount++;
+                            session.processed = processedCount;
+                        }
+                    }
+                });
+
+                await Promise.all(workers);
 
                 // Wait for extraction to fully complete (should already be done)
                 await extractionPromise;
