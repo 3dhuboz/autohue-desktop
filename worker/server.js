@@ -1573,6 +1573,25 @@ async function generateThumb(imagePath, sessionId, filename) {
     }
 }
 
+// ─── Count images in ZIP without extracting (fast pre-scan) ───
+async function countZipImages(archivePath) {
+    let count = 0;
+    await new Promise((resolve, reject) => {
+        fs.createReadStream(archivePath)
+            .pipe(unzipper.Parse())
+            .on('entry', (entry) => {
+                const fileName = path.basename(entry.path);
+                if (/\.(jpg|jpeg|png|gif|bmp|webp)$/i.test(fileName) && !fileName.startsWith('.') && !fileName.startsWith('__')) {
+                    count++;
+                }
+                entry.autodrain();
+            })
+            .on('close', resolve)
+            .on('error', reject);
+    });
+    return count;
+}
+
 // ─── Extract images from ZIP archive ───
 async function extractZip(archivePath, destDir, session) {
     let count = 0;
@@ -1583,7 +1602,8 @@ async function extractZip(archivePath, destDir, session) {
                 const fileName = path.basename(entry.path);
                 if (/\.(jpg|jpeg|png|gif|bmp|webp)$/i.test(fileName) && !fileName.startsWith('.') && !fileName.startsWith('__')) {
                     count++;
-                    session.currentFile = `Extracting: ${fileName} (${count} found)`;
+                    session.currentFile = `Extracting: ${fileName} (${count}${session.total > 0 ? '/' + session.total : ''})`;
+
                     // Handle duplicate names
                     let destName = fileName;
                     let c = 1;
@@ -1982,6 +2002,19 @@ app.post('/sort-local', async (req, res) => {
                 let processedCount = 0;
                 session.results = [];
                 session.colorCounts = {};
+
+                // Pre-scan: count total images in archive FAST (no extraction)
+                if (/\.zip$/i.test(inputPath)) {
+                    try {
+                        session.currentFile = 'Scanning archive...';
+                        const totalCount = await countZipImages(inputPath);
+                        session.total = totalCount;
+                        session.total_images = totalCount;
+                        console.log(`[${sessionId}] Pre-scan: ${totalCount} images in archive`);
+                    } catch (err) {
+                        console.warn(`[${sessionId}] Pre-scan failed: ${err.message}`);
+                    }
+                }
 
                 // Start extraction in background — pushes files to queue as they appear
                 const extractionPromise = (async () => {
