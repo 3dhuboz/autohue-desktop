@@ -708,17 +708,48 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .animate-slide-in-right {
-  animation: slideInRight 0.4s var(--ease-spring) both;
+  animation: slideInSort 0.6s var(--ease-spring) both;
 }
 
-@keyframes slideInRight {
+@keyframes slideInSort {
   0% {
     opacity: 0;
-    transform: translateX(30px) scale(0.9);
+    transform: translateX(60px) scale(0.7) rotate(3deg);
+    filter: blur(4px);
+  }
+  40% {
+    opacity: 1;
+    transform: translateX(-5px) scale(1.05) rotate(-1deg);
+    filter: blur(0);
+  }
+  60% {
+    transform: translateX(2px) scale(0.98) rotate(0.5deg);
   }
   100% {
     opacity: 1;
-    transform: translateX(0) scale(1);
+    transform: translateX(0) scale(1) rotate(0);
+    filter: blur(0);
+  }
+}
+
+/* Color stamp flash on new sort results */
+.animate-slide-in-right .color-stamp {
+  animation: stampFlash 0.8s ease-out both;
+  animation-delay: 0.3s;
+}
+
+@keyframes stampFlash {
+  0% {
+    opacity: 0;
+    transform: scale(2);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.2);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
   }
 }
 

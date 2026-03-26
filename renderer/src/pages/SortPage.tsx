@@ -79,6 +79,7 @@ export default function SortPage() {
   const [sessionId, setSessionId] = useState('');
   const [batchName, setBatchName] = useState('');
   const [error, setError] = useState('');
+  const [lightboxIdx, setLightboxIdx] = useState<number | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<{ percent: number; loaded: number; total: number; speed: number } | null>(null);
   const [expandedColor, setExpandedColor] = useState<string | null>(null);
@@ -648,9 +649,9 @@ export default function SortPage() {
                     : 'bg-white/5 text-white/30 border border-white/10'
                 }`}>
                   <span className={`w-1.5 h-1.5 rounded-full ${
-                    health?.claudeVision === 'active' ? 'bg-purple-400' : 'bg-white/30'
+                    (health?.claudeVision === 'active' || stats.results.some((r: any) => r.confidence === 'high')) ? 'bg-purple-400' : 'bg-white/30'
                   }`} />
-                  {health?.claudeVision === 'active' ? 'AI Vision Pro' : 'Local AI'}
+                  {(health?.claudeVision === 'active' || stats.results.some((r: any) => r.confidence === 'high')) ? 'AI Vision Pro' : 'Local AI'}
                 </span>
               )}
               <div className="flex items-center justify-center gap-3 mt-4">
@@ -674,6 +675,9 @@ export default function SortPage() {
                     if (confirm('Cancel sorting? Images already sorted will be kept.')) {
                       fetch(`${workerUrl}/cancel/${sessionId}`, { method: 'POST' });
                       localStorage.removeItem('autohue_active_session');
+                      if (pollRef.current) clearInterval(pollRef.current);
+                      setPaused(false);
+                      setPhase('complete');
                     }
                   }}
                   className="text-xs text-white/30 hover:text-red-400 transition-colors px-4 py-2 rounded-xl flex items-center gap-2"
@@ -743,8 +747,10 @@ export default function SortPage() {
                   {stats.results.slice(-12).reverse().map((r, i) => {
                     const info = COLOR_INFO[r.color] || COLOR_INFO['unknown'];
                     return (
-                      <div key={`${r.file}-${i}`} className="shrink-0 w-[100px] animate-slide-in-right" style={{ animationDelay: `${i * 0.05}s` }}>
-                        <div className="relative rounded-lg overflow-hidden bg-black/40 aspect-[4/3] border border-white/5">
+                      <div key={`${r.file}-${i}`} className="shrink-0 w-[100px] animate-slide-in-right cursor-pointer" style={{ animationDelay: `${i * 0.05}s` }}
+                        onClick={() => setLightboxIdx(stats.results.length - 1 - i)}
+                      >
+                        <div className="relative rounded-lg overflow-hidden bg-black/40 aspect-[4/3] border border-white/5 hover:border-racing-500/40 transition-colors">
                           {r.thumb ? (
                             <img src={`${workerUrl}${r.thumb}`} alt={r.file} className="w-full h-full object-cover" loading="lazy" />
                           ) : (
@@ -752,7 +758,7 @@ export default function SortPage() {
                               <CarIcon size={24} />
                             </div>
                           )}
-                          <div className="absolute bottom-0 inset-x-0 flex items-center gap-1 px-1.5 py-1 bg-black/70 backdrop-blur-sm">
+                          <div className="absolute bottom-0 inset-x-0 flex items-center gap-1 px-1.5 py-1 bg-black/70 backdrop-blur-sm color-stamp">
                             <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: info.swatch, boxShadow: `0 0 6px ${info.glow}` }} />
                             <span className="text-[8px] text-white/60 truncate">{info.label}</span>
                           </div>
@@ -886,6 +892,10 @@ export default function SortPage() {
                   <div className="text-2xl font-heading font-black text-amber-400">{timeSavedFormatted}</div>
                   <div className="text-[10px] text-white/30 mt-1">time saved</div>
                 </div>
+                <div className="text-center">
+                  <div className="text-2xl font-heading font-black text-green-500">{costSavedFormatted}</div>
+                  <div className="text-[10px] text-white/30 mt-1">cost saved</div>
+                </div>
               </div>
             </div>
 
@@ -930,7 +940,12 @@ export default function SortPage() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[500px] overflow-y-auto pr-2">
                   {stats.results.filter(r => r.color === expandedColor).map((result, idx) => (
                     <div key={`${result.file}-${idx}`} className="flex items-center gap-3 bg-white/5 rounded-xl px-3 py-2 hover:bg-white/[0.08] transition-colors">
-                      <div className="w-16 h-12 rounded-lg overflow-hidden bg-black/40 shrink-0">
+                      <div className="w-16 h-12 rounded-lg overflow-hidden bg-black/40 shrink-0 cursor-pointer hover:ring-2 hover:ring-racing-500/40 transition-all"
+                        onClick={() => {
+                          const globalIdx = stats.results.findIndex(r => r.file === result.file && r.color === result.color);
+                          if (globalIdx >= 0) setLightboxIdx(globalIdx);
+                        }}
+                      >
                         {result.thumb ? (
                           <img src={`${workerUrl}${result.thumb}`} alt={result.file} className="w-full h-full object-cover" loading="lazy" />
                         ) : (
@@ -985,6 +1000,67 @@ export default function SortPage() {
           </div>
         )}
       </div>
+
+      {/* ── Lightbox Image Viewer ── */}
+      {lightboxIdx !== null && stats.results[lightboxIdx] && (() => {
+        const r = stats.results[lightboxIdx];
+        const info = COLOR_INFO[r.color] || COLOR_INFO['unknown'];
+        return (
+          <div
+            className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-sm flex items-center justify-center"
+            onClick={() => setLightboxIdx(null)}
+          >
+            {/* Close button */}
+            <button className="absolute top-6 right-6 text-white/40 hover:text-white text-2xl z-10" onClick={() => setLightboxIdx(null)}>
+              <CloseIcon size={28} />
+            </button>
+
+            {/* Prev */}
+            {lightboxIdx > 0 && (
+              <button
+                className="absolute left-4 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white/60 hover:text-white transition-all z-10"
+                onClick={(e) => { e.stopPropagation(); setLightboxIdx(lightboxIdx - 1); }}
+              >
+                ‹
+              </button>
+            )}
+
+            {/* Next */}
+            {lightboxIdx < stats.results.length - 1 && (
+              <button
+                className="absolute right-4 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white/60 hover:text-white transition-all z-10"
+                onClick={(e) => { e.stopPropagation(); setLightboxIdx(lightboxIdx + 1); }}
+              >
+                ›
+              </button>
+            )}
+
+            {/* Image */}
+            <div className="max-w-[85vw] max-h-[85vh] relative" onClick={(e) => e.stopPropagation()}>
+              {r.thumb && (
+                <img
+                  src={`${workerUrl}${r.thumb}`}
+                  alt={r.file}
+                  className="max-w-full max-h-[80vh] object-contain rounded-xl shadow-2xl"
+                />
+              )}
+              {/* Info bar */}
+              <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/80 to-transparent rounded-b-xl px-6 py-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-4 h-4 rounded-full border-2 border-white/30" style={{ backgroundColor: info.swatch, boxShadow: `0 0 10px ${info.glow}` }} />
+                    <span className="text-white font-heading font-bold text-lg">{info.label}</span>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-white/50 text-xs truncate max-w-[300px]">{r.file}</div>
+                    <div className="text-white/30 text-[10px]">{lightboxIdx + 1} of {stats.results.length}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
