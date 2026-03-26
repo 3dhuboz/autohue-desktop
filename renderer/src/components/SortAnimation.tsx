@@ -217,8 +217,8 @@ export default function SortAnimation({ results, isProcessing, totalProcessed }:
             </svg>
           </div>
           <span className="text-[8px] text-white/20 tracking-widest uppercase">Sorted</span>
-          {completed.length > 0 && (
-            <span className="text-[10px] text-green-400/70 font-bold tabular-nums">{completed.length}</span>
+          {(totalProcessed ?? completed.length) > 0 && (
+            <span className="text-[10px] text-green-400/70 font-bold tabular-nums">{totalProcessed ?? completed.length}</span>
           )}
         </div>
 
