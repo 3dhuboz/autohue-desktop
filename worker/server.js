@@ -2024,9 +2024,13 @@ app.post('/sort-local', async (req, res) => {
                                         entry.pipe(ws);
                                         ws.on('finish', () => {
                                             pendingFiles.push(destPath);
-                                            session.total = extractedCount;
-                                            session.total_images = extractedCount;
-                                            session.currentFile = `Extracting: ${destName} (${extractedCount} found)`;
+                                            // Only update total if pre-scan didn't set it (or if we found more than expected)
+                                            if (!session.total || extractedCount > session.total) {
+                                                session.total = extractedCount;
+                                                session.total_images = extractedCount;
+                                            }
+                                            session.extracted = extractedCount;
+                                            session.currentFile = `Extracting: ${destName} (${extractedCount}/${session.total})`;
                                         });
                                     } else {
                                         entry.autodrain();
@@ -2368,6 +2372,7 @@ app.get('/status/:sessionId', (req, res) => {
         status: session.status,
         processed: session.processed,
         total: session.total,
+        extracted: session.extracted || session.processed,
         current_file: session.currentFile,
         color_counts: session.colorCounts || {},
         new_results: newResults,
