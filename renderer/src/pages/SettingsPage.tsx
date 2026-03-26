@@ -351,7 +351,7 @@ export default function SettingsPage({ license, onRefresh }: Props) {
                             return;
                           }
                           const port = await window.electronAPI.getWorkerPort();
-                          const res = await fetch(`http://localhost:${port}/test-openrouter`, {
+                          const res = await fetch(`http://127.0.0.1:${port}/test-openrouter`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             ...(keyToTest ? { body: JSON.stringify({ key: keyToTest }) } : {}),

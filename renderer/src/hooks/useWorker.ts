@@ -38,7 +38,7 @@ export function useWorker() {
     };
   }, []);
 
-  const workerUrl = `http://localhost:${port}`;
+  const workerUrl = `http://127.0.0.1:${port}`;
 
   return { health, port, ready, workerUrl };
 }

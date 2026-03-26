@@ -2539,7 +2539,7 @@ app.post('/test-openrouter', express.json(), async (req, res) => {
 app.use('/output', express.static(OUTPUT_DIR));
 
 // ─── Start server immediately, load AI model in background ───
-app.listen(PORT, () => {
+app.listen(PORT, '127.0.0.1', () => {
     console.log(`Car Photo Color Sorter running at http://localhost:${PORT}`);
     loadModel().then(() => {
         console.log(`ONNX model: ${onnxSession ? 'loaded' : 'NOT loaded (fallback mode)'}`);

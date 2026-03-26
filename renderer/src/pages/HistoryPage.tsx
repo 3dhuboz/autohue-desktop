@@ -494,7 +494,7 @@ export default function HistoryPage() {
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                window.open(`http://localhost:${port}/download/${entry.session_id}`, '_blank');
+                                window.open(`http://127.0.0.1:${port}/download/${entry.session_id}`, '_blank');
                               }}
                               className="text-[11px] px-3 py-1.5 rounded-lg bg-green-500/10 text-green-400 border border-green-500/20 hover:bg-green-500/20 transition-all flex items-center gap-1.5"
                             >

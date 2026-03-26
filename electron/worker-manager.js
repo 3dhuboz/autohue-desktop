@@ -143,7 +143,7 @@ class WorkerManager {
   async _waitForReady(retries = 40, interval = 500) {
     for (let i = 0; i < retries; i++) {
       try {
-        const res = await fetch(`http://localhost:${this.port}/health`);
+        const res = await fetch(`http://127.0.0.1:${this.port}/health`);
         if (res.ok) return;
       } catch {
         // Worker not ready yet
@@ -166,7 +166,7 @@ class WorkerManager {
   /** Check worker health. */
   async checkHealth() {
     try {
-      const res = await fetch(`http://localhost:${this.port}/health`, {
+      const res = await fetch(`http://127.0.0.1:${this.port}/health`, {
         signal: AbortSignal.timeout(3000),
       });
       if (res.ok) return await res.json();
