@@ -425,14 +425,28 @@ export default function SortPage() {
               </h1>
               <p className="text-white/40 text-sm">Drag & drop, pick files, or select an entire folder. Sorted in seconds.</p>
               {license?.active && (
-                <div className="inline-flex items-center gap-2 mt-3 bg-white/[0.03] border border-white/5 rounded-full px-4 py-1.5 text-xs">
-                  <span className="text-racing-500">
-                    <CheckIcon size={12} />
-                  </span>
-                  <span className="text-white/50">
-                    {license.isUnlimited ? 'Unlimited processing' : `${license.remaining?.toLocaleString()} images remaining today`}
-                  </span>
-                </div>
+                <>
+                  <div className="inline-flex items-center gap-2 mt-3 bg-white/[0.03] border border-white/5 rounded-full px-4 py-1.5 text-xs">
+                    <span className="text-racing-500">
+                      <CheckIcon size={12} />
+                    </span>
+                    <span className="text-white/50">
+                      {license.isUnlimited ? 'Unlimited processing' : `${license.remaining?.toLocaleString()} images remaining today`}
+                    </span>
+                  </div>
+                  {license.tier === 'trial' && (
+                    <div className="mt-3 bg-gradient-to-r from-racing-600/10 to-purple-600/10 border border-racing-500/20 rounded-xl px-5 py-3 text-center">
+                      <div className="text-xs text-white/70 font-heading font-bold">🏎️ Free Trial — 50 images/day for 7 days</div>
+                      <div className="text-[10px] text-white/40 mt-1">Loving the accuracy? Upgrade for up to 5,000 images/day</div>
+                      <button
+                        onClick={() => window.electronAPI?.openInExplorer?.('https://autohue.app/pricing')}
+                        className="mt-2 text-[11px] font-bold text-racing-400 hover:text-racing-300 underline underline-offset-2 decoration-racing-500/30"
+                      >
+                        View Plans →
+                      </button>
+                    </div>
+                  )}
+                </>
               )}
             </div>
 

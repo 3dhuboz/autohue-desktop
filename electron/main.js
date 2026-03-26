@@ -60,10 +60,10 @@ app.whenReady().then(async () => {
   // 2. Initialize license manager
   licenseManager = new LicenseManager(db);
 
-  // 2b. Dev mode: auto-seed Unlimited test license if none exists
-  if (isDev) {
-    const current = licenseManager.getCurrent();
-    if (!current.active) {
+  // 2b. Auto-seed trial license if no license exists (frictionless onboarding)
+  const current = licenseManager.getCurrent();
+  if (!current.active) {
+    if (isDev) {
       console.log('[dev] No license found — seeding Unlimited test license');
       db.prepare(`
         INSERT OR REPLACE INTO license (id, license_key, tier, daily_limit, machine_id,
@@ -80,7 +80,25 @@ app.whenReady().then(async () => {
         null,
         'active',
       );
-      console.log('[dev] Unlimited license activated');
+    } else {
+      // Auto-activate 7-day trial — no key needed, just install and go
+      console.log('[license] No license found — auto-activating 7-day trial (50 images/day)');
+      const trialExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+      db.prepare(`
+        INSERT OR REPLACE INTO license (id, license_key, tier, daily_limit, machine_id,
+          activated_at, expires_at, last_validated, validation_response, subscription_status)
+        VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        'AUTO-TRIAL',
+        'trial',
+        50,
+        licenseManager.machineId || 'unknown',
+        new Date().toISOString(),
+        trialExpiry,
+        new Date().toISOString(),
+        null,
+        'active',
+      );
     }
   }
 
