@@ -890,25 +890,35 @@ export default function SortPage() {
                 <CheckIcon size={36} className="text-white" />
               </div>
               <h2 className="text-3xl font-heading font-black mb-2">Sorting Complete!</h2>
-              <p className="text-white/40 text-sm">{stats.processed} images sorted into {Object.keys(stats.colorCounts).length} color folders</p>
+              <p className="text-white/40 text-sm mb-6">{stats.processed} images sorted into {Object.keys(stats.colorCounts).length} color folders</p>
 
-              <div className="flex items-center justify-center gap-8 mt-8 pt-6 border-t border-white/5">
-                <div className="text-center">
-                  <div className="text-2xl font-heading font-black text-racing-500">{stats.imagesPerSecond.toFixed(1)}</div>
-                  <div className="text-[10px] text-white/30 mt-1">img/sec avg</div>
+              {/* Big impact stats */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+                <div className="bg-white/[0.03] rounded-xl p-4 border border-white/5">
+                  <div className="text-3xl font-heading font-black text-racing-500">{stats.processed.toLocaleString()}</div>
+                  <div className="text-[10px] text-white/30 mt-1 uppercase tracking-wider">Images Sorted</div>
                 </div>
-                <div className="text-center">
-                  <div className="text-2xl font-heading font-black text-green-400">{confPct.toFixed(0)}%</div>
-                  <div className="text-[10px] text-white/30 mt-1">accuracy</div>
+                <div className="bg-white/[0.03] rounded-xl p-4 border border-white/5">
+                  <div className="text-3xl font-heading font-black text-green-400">{timeSavedFormatted}</div>
+                  <div className="text-[10px] text-white/30 mt-1 uppercase tracking-wider">Time Saved</div>
                 </div>
-                <div className="text-center">
-                  <div className="text-2xl font-heading font-black text-amber-400">{timeSavedFormatted}</div>
-                  <div className="text-[10px] text-white/30 mt-1">time saved</div>
+                <div className="bg-white/[0.03] rounded-xl p-4 border border-white/5">
+                  <div className="text-3xl font-heading font-black text-emerald-400">{costSavedFormatted}</div>
+                  <div className="text-[10px] text-white/30 mt-1 uppercase tracking-wider">Cost Saved</div>
                 </div>
-                <div className="text-center">
-                  <div className="text-2xl font-heading font-black text-green-500">{costSavedFormatted}</div>
-                  <div className="text-[10px] text-white/30 mt-1">cost saved</div>
+                <div className="bg-white/[0.03] rounded-xl p-4 border border-white/5">
+                  <div className="text-3xl font-heading font-black text-purple-400">{stats.imagesPerSecond.toFixed(1)}</div>
+                  <div className="text-[10px] text-white/30 mt-1 uppercase tracking-wider">Images/Sec</div>
                 </div>
+              </div>
+
+              {/* Secondary stats */}
+              <div className="flex items-center justify-center gap-6 text-xs text-white/30 border-t border-white/5 pt-4">
+                <span>{confPct.toFixed(0)}% accuracy</span>
+                <span>·</span>
+                <span>{Object.keys(stats.colorCounts).length} colors detected</span>
+                <span>·</span>
+                <span>Manual estimate: ~{Math.ceil(stats.processed * 15 / 60)} min @ 15s/photo</span>
               </div>
             </div>
 
