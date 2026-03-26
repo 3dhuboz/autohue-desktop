@@ -83,6 +83,19 @@ export default function HistoryPage() {
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [browseFiles, setBrowseFiles] = useState<SessionFile[]>([]);
   const [browseLoading, setBrowseLoading] = useState(false);
+  const [lightboxIdx, setLightboxIdx] = useState<number | null>(null);
+
+  // Keyboard nav for lightbox
+  useEffect(() => {
+    if (lightboxIdx === null) return;
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { setLightboxIdx(null); return; }
+      if (e.key === 'ArrowRight' || e.key === 'ArrowDown') setLightboxIdx(prev => prev !== null ? Math.min(prev + 1, browseFiles.length - 1) : prev);
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') setLightboxIdx(prev => prev !== null ? Math.max(prev - 1, 0) : prev);
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [lightboxIdx, browseFiles.length]);
 
   useEffect(() => {
     window.electronAPI.getHistory()
@@ -171,6 +184,7 @@ export default function HistoryPage() {
     } else {
       const newId = expandedId === entry.id ? null : entry.id;
       setExpandedId(newId);
+      setLightboxIdx(null);
       if (newId && entry.session_id) {
         setBrowseLoading(true);
         setBrowseFiles([]);
@@ -524,8 +538,12 @@ export default function HistoryPage() {
                               {browseFiles.map((f, idx) => {
                                 const hex = SWATCH[f.color] || '#666';
                                 return (
-                                  <div key={`${f.filename}-${idx}`} className="relative group cursor-pointer">
-                                    <div className="aspect-[4/3] rounded-md overflow-hidden bg-black/40 border border-white/5 group-hover:border-racing-500/40 transition-all">
+                                  <button
+                                    key={`${f.filename}-${idx}`}
+                                    className="relative group cursor-pointer text-left"
+                                    onClick={() => setLightboxIdx(idx)}
+                                  >
+                                    <div className="aspect-[4/3] rounded-md overflow-hidden bg-black/40 border border-white/5 group-hover:border-racing-500/40 group-hover:scale-[1.04] transition-all duration-200">
                                       <img
                                         src={`file://${f.path.replace(/\\/g, '/')}`}
                                         alt={f.filename}
@@ -537,7 +555,7 @@ export default function HistoryPage() {
                                       <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: hex }} />
                                       <span className="text-[6px] text-white/50 truncate">{f.color}</span>
                                     </div>
-                                  </div>
+                                  </button>
                                 );
                               })}
                             </div>
@@ -556,6 +574,61 @@ export default function HistoryPage() {
           </section>
         ))}
       </div>
+
+      {/* ── Lightbox Image Viewer ── */}
+      {lightboxIdx !== null && browseFiles[lightboxIdx] && (() => {
+        const f = browseFiles[lightboxIdx];
+        const hex = SWATCH[f.color] || '#666';
+        const fileUrl = `file://${f.path.replace(/\\/g, '/')}`;
+        return (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm"
+            onClick={() => setLightboxIdx(null)}
+          >
+            {/* Close button */}
+            <button className="absolute top-6 right-6 text-white/40 hover:text-white text-2xl z-10" onClick={() => setLightboxIdx(null)}>
+              <CloseIcon size={24} />
+            </button>
+
+            {/* Prev arrow */}
+            {lightboxIdx > 0 && (
+              <button
+                className="absolute left-4 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white/60 hover:text-white transition-all z-10"
+                onClick={(e) => { e.stopPropagation(); setLightboxIdx(lightboxIdx - 1); }}
+              >
+                <svg viewBox="0 0 24 24" width={20} height={20} fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 19l-7-7 7-7" /></svg>
+              </button>
+            )}
+
+            {/* Next arrow */}
+            {lightboxIdx < browseFiles.length - 1 && (
+              <button
+                className="absolute right-4 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white/60 hover:text-white transition-all z-10"
+                onClick={(e) => { e.stopPropagation(); setLightboxIdx(lightboxIdx + 1); }}
+              >
+                <svg viewBox="0 0 24 24" width={20} height={20} fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 5l7 7-7 7" /></svg>
+              </button>
+            )}
+
+            {/* Image + info */}
+            <div className="flex flex-col items-center gap-4 max-w-[90vw] max-h-[90vh]" onClick={e => e.stopPropagation()}>
+              <img
+                src={fileUrl}
+                alt={f.filename}
+                className="max-w-full max-h-[80vh] object-contain rounded-xl shadow-2xl"
+              />
+              <div className="flex items-center gap-3 bg-white/5 rounded-xl px-4 py-2 backdrop-blur-sm border border-white/10">
+                <div className="w-3 h-3 rounded-full" style={{ background: hex, boxShadow: `0 0 8px ${hex}66` }} />
+                <span className="text-sm text-white/70 font-mono truncate max-w-[300px]">{f.filename}</span>
+                <span className="text-white/20">·</span>
+                <span className="text-xs text-white/40 capitalize">{f.color}</span>
+                <span className="text-white/20">·</span>
+                <span className="text-white/30 text-[10px]">{lightboxIdx + 1} of {browseFiles.length}</span>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

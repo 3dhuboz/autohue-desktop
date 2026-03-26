@@ -3,6 +3,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const Jimp = require('jimp');
+const sharp = require('sharp');
 const archiver = require('archiver');
 const crypto = require('crypto');
 const unzipper = require('unzipper');
@@ -136,7 +137,7 @@ async function classifyWithClaude(imageBuffer) {
 }
 
 // ─── Batch classify multiple images in ONE API call (3-4x faster) ───
-const BATCH_SIZE = 4;
+const BATCH_SIZE = 6; // 6 images per API call — sweet spot for throughput vs latency
 
 async function classifyBatchWithClaude(imageBuffers) {
     if (!CLAUDE_API_KEY || imageBuffers.length === 0) return null;
@@ -218,10 +219,11 @@ async function prepareImageForClaude(imagePath) {
     if (isJpeg && fileStat.size < 10000000) {
         return fs.readFileSync(imagePath);
     }
-    // Only resize truly massive files (>5MB RAW exports, PNGs etc)
-    const img = await Jimp.read(imagePath);
-    const resized = img.clone().resize(Math.min(800, img.getWidth()), Jimp.AUTO).quality(70);
-    return resized.getBufferAsync(Jimp.MIME_JPEG);
+    // Only resize truly massive files (>5MB RAW exports, PNGs etc) — use sharp for speed
+    return sharp(imagePath)
+        .resize(800, null, { withoutEnlargement: true })
+        .jpeg({ quality: 70 })
+        .toBuffer();
 }
 
 // ─── Nyckel API configuration (from environment variables) ───
@@ -1420,14 +1422,16 @@ async function analyzeImageColor(imagePath) {
     }
 }
 
-// ─── Generate a small thumbnail for live preview ───
+// ─── Generate a small thumbnail for live preview (sharp — ~10x faster than Jimp) ───
 async function generateThumb(imagePath, sessionId, filename) {
     try {
         const thumbDir = path.join(THUMB_DIR, sessionId);
         fs.mkdirSync(thumbDir, { recursive: true });
         const thumbPath = path.join(thumbDir, filename.replace(/\.[^.]+$/, '.jpg'));
-        const image = await Jimp.read(imagePath);
-        await image.resize(120, Jimp.AUTO).quality(70).writeAsync(thumbPath);
+        await sharp(imagePath)
+            .resize(120, null, { withoutEnlargement: true })
+            .jpeg({ quality: 70 })
+            .toFile(thumbPath);
         return `/thumbs/${sessionId}/${path.basename(thumbPath)}`;
     } catch (err) {
         console.error(`[thumb] Failed for ${filename}:`, err.message);
@@ -1903,9 +1907,11 @@ app.post('/sort-local', async (req, res) => {
                     if (session.status === 'cancelled') throw new Error('CANCELLED');
                 }
 
-                // ── BATCH + CONCURRENT PROCESSING: 2 workers × 4 images per batch = 8 images per cycle ──
+                // ── BATCH + CONCURRENT PROCESSING: 2 workers × 6 images per batch = 12 images per cycle ──
                 const BATCH_CONCURRENCY = 2; // Number of parallel batch API calls
                 let cancelled = false;
+                // Pre-read cache: start reading next batch while current batch is classifying
+                const preReadCache = new Map(); // filePath → Promise<Buffer|null>
 
                 function grabBatch(maxSize) {
                     const batch = [];
@@ -1915,14 +1921,31 @@ app.post('/sort-local', async (req, res) => {
                     return batch;
                 }
 
+                // Pre-read upcoming files into cache (overlaps disk I/O with API latency)
+                function preReadAhead(count) {
+                    const upcoming = pendingFiles.slice(0, count);
+                    for (const fp of upcoming) {
+                        if (!preReadCache.has(fp)) {
+                            preReadCache.set(fp, prepareImageForClaude(fp).catch(() => null));
+                        }
+                    }
+                }
+
                 async function processBatch(batchFiles, workerIdx) {
                     if (batchFiles.length === 0) return;
                     await waitIfPaused();
                     if (cancelled || session.status === 'cancelled') { cancelled = true; return; }
 
-                    // Prepare all images for Claude in parallel
+                    // Pre-read next batch while we process this one
+                    preReadAhead(BATCH_SIZE * BATCH_CONCURRENCY);
+
+                    // Prepare all images for Claude — use pre-read cache if available
                     const buffers = await Promise.all(
-                        batchFiles.map(fp => prepareImageForClaude(fp).catch(() => null))
+                        batchFiles.map(fp => {
+                            const cached = preReadCache.get(fp);
+                            if (cached) { preReadCache.delete(fp); return cached; }
+                            return prepareImageForClaude(fp).catch(() => null);
+                        })
                     );
                     const validIndices = buffers.map((b, i) => b ? i : -1).filter(i => i >= 0);
                     const validBuffers = validIndices.map(i => buffers[i]);

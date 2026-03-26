@@ -25,11 +25,12 @@ execSync([
   '--outfile=worker/dist/server.js',
   '--external:onnxruntime-node',  // native .node binding
   '--external:node-unrar-js',     // native .node binding (wasm)
+  '--external:sharp',             // native libvips binding
   '--external:@aws-sdk/*',        // optional, not needed
 ].join(' '), { cwd: ROOT, stdio: 'inherit' });
 
 // 2. Copy native modules that were externalized
-const NATIVE_MODULES = ['onnxruntime-node', 'node-unrar-js'];
+const NATIVE_MODULES = ['onnxruntime-node', 'node-unrar-js', 'sharp'];
 const distModules = path.join(DIST, 'node_modules');
 fs.mkdirSync(distModules, { recursive: true });
 

@@ -346,6 +346,12 @@ export default function SortPage() {
                 if (entry) window.electronAPI.renameHistory?.(entry.id, batchName.trim());
               }).catch(() => {});
             }
+            // Auto-open output folder on completion (not cancellation)
+            if (data.status === 'completed') {
+              window.electronAPI.getUserDataPath?.().then(udp => {
+                window.electronAPI.openInExplorer?.(`${udp}/worker-data/output/${sid}`);
+              }).catch(() => {});
+            }
           }
         }
       } catch (e) {
@@ -691,7 +697,17 @@ export default function SortPage() {
                       localStorage.removeItem('autohue_active_session');
                       if (pollRef.current) clearInterval(pollRef.current);
                       setPaused(false);
-                      setPhase('complete');
+                      // If nothing was sorted, reset to upload; otherwise show results
+                      if (stats.processed === 0) {
+                        setPhase('upload');
+                        setFiles([]);
+                        setFolderPath(null);
+                        setSessionId('');
+                        setError('');
+                        setStats({ processed: 0, total: 0, currentFile: '', startTime: 0, imagesPerSecond: 0, avgConfidence: 0, timeSavedSeconds: 0, results: [], colorCounts: {} });
+                      } else {
+                        setPhase('complete');
+                      }
                     }
                   }}
                   className="text-xs text-white/30 hover:text-red-400 transition-colors px-4 py-2 rounded-xl flex items-center gap-2"
@@ -923,7 +939,7 @@ export default function SortPage() {
                     className={`color-card glass-card rounded-2xl p-5 text-left transition-all duration-200 ${isExpanded ? 'ring-2 ring-white/30 scale-[1.02]' : 'hover:scale-[1.03] active:scale-[0.98]'}`}
                     style={{ borderColor: `${info.swatch}20` }}>
                     <div className="flex items-center gap-3 mb-3">
-                      <div className="w-8 h-8 rounded-xl transition-shadow duration-200" style={{ background: info.swatch, boxShadow: `0 0 12px ${info.glow}` }} />
+                      <div className="w-8 h-8 rounded-xl transition-shadow duration-200" style={{ background: info.swatch, boxShadow: `0 0 12px ${info.glow}`, border: color === 'white' || color === 'silver-grey' ? '1px solid rgba(255,255,255,0.15)' : 'none' }} />
                       <span className="font-heading font-bold text-sm">{info.label}</span>
                       <span className="text-white/20 text-xs ml-auto transition-transform duration-200" style={{ transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)' }}>
                         <svg viewBox="0 0 12 12" width={12} height={12} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M3 5L6 8L9 5" /></svg>
