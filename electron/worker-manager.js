@@ -9,6 +9,8 @@ class WorkerManager {
     this.storagePath = storagePath;
     this.restarting = false;
     this.claudeApiKey = null;
+    this.geminiApiKey = null;
+    this.visionEngine = 'auto';
 
     // Ensure storage directories exist
     fs.mkdirSync(storagePath, { recursive: true });
@@ -17,10 +19,27 @@ class WorkerManager {
   /** Set the Claude API key for Vision classification. */
   setClaudeApiKey(key) {
     this.claudeApiKey = key;
-    // If worker is already running, send the key via message
     if (this.process && key) {
       this.process.send({ type: 'set-claude-key', key });
       console.log('[worker] Sent Claude API key to running worker');
+    }
+  }
+
+  /** Set the Gemini API key for Vision classification. */
+  setGeminiApiKey(key) {
+    this.geminiApiKey = key;
+    if (this.process && key) {
+      this.process.send({ type: 'set-gemini-key', key });
+      console.log('[worker] Sent Gemini API key to running worker');
+    }
+  }
+
+  /** Set the vision engine preference. */
+  setVisionEngine(engine) {
+    this.visionEngine = engine;
+    if (this.process) {
+      this.process.send({ type: 'set-vision-engine', engine });
+      console.log(`[worker] Set vision engine to: ${engine}`);
     }
   }
 
@@ -83,12 +102,15 @@ class WorkerManager {
       console.log(`[worker] Passing CLAUDE_API_KEY to worker env: ${claudeKey.slice(0, 12)}...`);
     }
 
+    const geminiKey = this.geminiApiKey;
     this.process = fork(serverPath, [], {
       env: {
         ...process.env,
         PORT: String(this.port),
         STORAGE_ROOT: this.storagePath,
         ...(claudeKey ? { CLAUDE_API_KEY: claudeKey } : {}),
+        ...(geminiKey ? { GEMINI_API_KEY: geminiKey } : {}),
+        VISION_ENGINE: this.visionEngine || 'auto',
       },
       silent: true, // capture stdout/stderr
     });

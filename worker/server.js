@@ -37,35 +37,61 @@ app.use(express.json());
 // Fallback: multi-region sampling + HSV env filtering if SegFormer unavailable
 // ═══════════════════════════════════════════════════════════════════════════
 
-// ─── Claude Vision API (PRIMARY classifier for Pro/Unlimited tiers) ───
+// ─── Vision API keys ───
 let CLAUDE_API_KEY = process.env.CLAUDE_API_KEY || '';
+let GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
+let VISION_ENGINE = process.env.VISION_ENGINE || 'auto'; // 'gemini' | 'claude' | 'local' | 'auto'
 
-// Fallback: read from a keyfile dropped by the main process
+// Fallback: read from keyfiles dropped by the main process
 if (!CLAUDE_API_KEY) {
     try {
         const keyFile = path.join(STORAGE_ROOT, '.claude-key');
         if (fs.existsSync(keyFile)) {
             CLAUDE_API_KEY = fs.readFileSync(keyFile, 'utf8').trim();
-            if (CLAUDE_API_KEY) {
-                console.log('[config] Claude Vision key loaded from keyfile: ' + CLAUDE_API_KEY.slice(0, 15) + '...');
-            }
+            if (CLAUDE_API_KEY) console.log('[config] Claude key loaded from keyfile');
         }
-    } catch (err) {
-        console.warn('[config] Keyfile read failed:', err.message);
-    }
+    } catch (err) { console.warn('[config] Claude keyfile read failed:', err.message); }
+}
+if (!GEMINI_API_KEY) {
+    try {
+        const keyFile = path.join(STORAGE_ROOT, '.gemini-key');
+        if (fs.existsSync(keyFile)) {
+            GEMINI_API_KEY = fs.readFileSync(keyFile, 'utf8').trim();
+            if (GEMINI_API_KEY) console.log('[config] Gemini key loaded from keyfile');
+        }
+    } catch (err) { console.warn('[config] Gemini keyfile read failed:', err.message); }
 }
 
-if (CLAUDE_API_KEY) {
-    console.log('[config] Claude Vision API key set — PRIMARY classifier enabled (3-5x faster, higher accuracy)');
-} else {
-    console.log('[config] No Claude Vision key — using local LAB classifier');
+// Determine active engine
+function getActiveEngine() {
+    if (VISION_ENGINE === 'gemini' && GEMINI_API_KEY) return 'gemini';
+    if (VISION_ENGINE === 'claude' && CLAUDE_API_KEY) return 'claude';
+    if (VISION_ENGINE === 'local') return 'local';
+    // Auto: prefer Gemini (fastest), then Claude, then local
+    if (GEMINI_API_KEY) return 'gemini';
+    if (CLAUDE_API_KEY) return 'claude';
+    return 'local';
 }
 
-// Listen for runtime key updates from main process
+console.log(`[config] Vision engine: ${VISION_ENGINE} → active: ${getActiveEngine()}`);
+if (GEMINI_API_KEY) console.log('[config] Gemini 2.5 Flash key set — HIGH-SPEED classifier enabled');
+if (CLAUDE_API_KEY) console.log('[config] Claude Vision key set — available as fallback');
+if (!GEMINI_API_KEY && !CLAUDE_API_KEY) console.log('[config] No API keys — using local LAB classifier');
+
+// Listen for runtime key/engine updates from main process
 process.on('message', (msg) => {
-    if (msg && msg.type === 'set-claude-key' && msg.key) {
+    if (!msg) return;
+    if (msg.type === 'set-claude-key' && msg.key) {
         CLAUDE_API_KEY = msg.key;
         console.log('[config] Claude Vision API key updated at runtime');
+    }
+    if (msg.type === 'set-gemini-key' && msg.key) {
+        GEMINI_API_KEY = msg.key;
+        console.log('[config] Gemini API key updated at runtime');
+    }
+    if (msg.type === 'set-vision-engine' && msg.engine) {
+        VISION_ENGINE = msg.engine;
+        console.log(`[config] Vision engine changed to: ${msg.engine} → active: ${getActiveEngine()}`);
     }
 });
 
@@ -96,7 +122,7 @@ async function classifyWithClaude(imageBuffer) {
                         },
                         {
                             type: 'text',
-                            text: 'What is the BODY/PAINT color of the main car/vehicle in this motorsport/drag racing photo? CRITICAL RULES: 1) The car may be small in the frame surrounded by smoke — find it and focus ONLY on its paint color. 2) IGNORE all background elements: grass, dirt, sky, track surface, barriers, flags, buildings, spectators. 3) IGNORE smoke, haze, dust, and reflections. 4) White cars in smoke are "white" not "silver-grey". Only say "silver-grey" for actual metallic silver/grey paint. 5) Do NOT let warm grass/dirt trick you into saying "yellow" or "brown" — those are background, not the car. 6) Teal/turquoise/cyan = "blue". Reply with ONLY one word from: red, blue, green, yellow, orange, purple, pink, brown, black, white, silver-grey',
+                            text: Buffer.from('V2hhdCBpcyB0aGUgQk9EWS9QQUlOVCBjb2xvciBvZiB0aGUgbWFpbiBjYXIvdmVoaWNsZSBpbiB0aGlzIG1vdG9yc3BvcnQvZHJhZyByYWNpbmcgcGhvdG8/IENSSVRJQ0FMIFJVTEVTOiAxKSBUaGUgY2FyIG1heSBiZSBzbWFsbCBpbiB0aGUgZnJhbWUgc3Vycm91bmRlZCBieSBzbW9rZSDigJQgZmluZCBpdCBhbmQgZm9jdXMgT05MWSBvbiBpdHMgcGFpbnQgY29sb3IuIDIpIElHTk9SRSBhbGwgYmFja2dyb3VuZCBlbGVtZW50czogZ3Jhc3MsIGRpcnQsIHNreSwgdHJhY2sgc3VyZmFjZSwgYmFycmllcnMsIGZsYWdzLCBidWlsZGluZ3MsIHNwZWN0YXRvcnMuIDMpIElHTk9SRSBzbW9rZSwgaGF6ZSwgZHVzdCwgYW5kIHJlZmxlY3Rpb25zLiA0KSBXaGl0ZSBjYXJzIGluIHNtb2tlIGFyZSAid2hpdGUiIG5vdCAic2lsdmVyLWdyZXkiLiBPbmx5IHNheSAic2lsdmVyLWdyZXkiIGZvciBhY3R1YWwgbWV0YWxsaWMgc2lsdmVyL2dyZXkgcGFpbnQuIDUpIERvIE5PVCBsZXQgd2FybSBncmFzcy9kaXJ0IHRyaWNrIHlvdSBpbnRvIHNheWluZyAieWVsbG93IiBvciAiYnJvd24iIOKAlCB0aG9zZSBhcmUgYmFja2dyb3VuZCwgbm90IHRoZSBjYXIuIDYpIFRlYWwvdHVycXVvaXNlL2N5YW4gPSAiYmx1ZSIuIFJlcGx5IHdpdGggT05MWSBvbmUgd29yZCBmcm9tOiByZWQsIGJsdWUsIGdyZWVuLCB5ZWxsb3csIG9yYW5nZSwgcHVycGxlLCBwaW5rLCBicm93biwgYmxhY2ssIHdoaXRlLCBzaWx2ZXItZ3JleQ==', 'base64').toString('utf8'),
                         },
                     ],
                 }],
@@ -153,7 +179,7 @@ async function classifyBatchWithClaude(imageBuffers) {
         }
         content.push({
             type: 'text',
-            text: `There are ${imageBuffers.length} motorsport/drag racing photos above (numbered 1 to ${imageBuffers.length} in order). For EACH photo, identify the BODY/PAINT color of the main car/vehicle. CRITICAL: Ignore tire smoke, burnout haze, dust, and reflections — focus on the actual paint color. White cars in smoke are still "white". Only say "silver-grey" for actual metallic silver/grey paint. Teal/turquoise/cyan = "blue". Reply with EXACTLY ${imageBuffers.length} color words, one per line, in order. Each line must be ONE word from: red, blue, green, yellow, orange, purple, pink, brown, black, white, silver-grey`,
+            text: `There are ${imageBuffers.length} photos above (numbered 1 to ${imageBuffers.length}). ${COLOR_PROMPT}`,
         });
 
         const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -211,21 +237,114 @@ async function classifyBatchWithClaude(imageBuffers) {
 }
 
 // ─── Prepare image buffer for Claude (shared by single + batch) ───
-async function prepareImageForClaude(imagePath) {
-    const fileStat = fs.statSync(imagePath);
-    const isJpeg = /\.(jpg|jpeg)$/i.test(imagePath);
-    // Skip Jimp entirely for JPEGs under 10MB — send as-is
-    // Claude handles large images fine, and skipping Jimp saves 3-5s per image
-    // Token cost difference is minimal (~$0.002 more per image for larger files)
-    if (isJpeg && fileStat.size < 10000000) {
-        return fs.readFileSync(imagePath);
-    }
-    // Only resize truly massive files (>5MB RAW exports, PNGs etc)
+async function prepareImageForApi(imagePath) {
+    // ALWAYS resize to 800px max — sending full-res 5-8MB photos is the #1 speed killer
+    // 800px is more than enough for color classification, and produces ~50-80KB JPEGs
+    // This alone cuts payload from ~40MB to ~600KB per batch of 10
     if (sharp) {
-        return sharp(imagePath).resize(800, null, { withoutEnlargement: true }).jpeg({ quality: 70 }).toBuffer();
+        return sharp(imagePath).resize(800, null, { withoutEnlargement: true }).jpeg({ quality: 75 }).toBuffer();
     }
     const img = await Jimp.read(imagePath);
-    return img.clone().resize(Math.min(800, img.getWidth()), Jimp.AUTO).quality(70).getBufferAsync(Jimp.MIME_JPEG);
+    return img.clone().resize(Math.min(800, img.getWidth()), Jimp.AUTO).quality(75).getBufferAsync(Jimp.MIME_JPEG);
+}
+
+// ─── Gemini 2.5 Flash batch classifier (PRIMARY — fastest) ───
+const GEMINI_BATCH_SIZE = 15; // Gemini handles up to 50 images per call; 15 is the throughput sweet spot
+const CLAUDE_BATCH_SIZE = 6;  // Claude works best with smaller batches
+
+// Classification instructions (encoded to protect IP in distributed builds)
+const COLOR_PROMPT = Buffer.from('Rm9yIEVBQ0ggbW90b3JzcG9ydC9kcmFnIHJhY2luZyBwaG90byBhYm92ZSwgaWRlbnRpZnkgdGhlIEJPRFkvUEFJTlQgY29sb3Igb2YgdGhlIG1haW4gY2FyL3ZlaGljbGUuIENSSVRJQ0FMOiBJZ25vcmUgdGlyZSBzbW9rZSwgYnVybm91dCBoYXplLCBkdXN0LCBhbmQgcmVmbGVjdGlvbnMg4oCUIGZvY3VzIG9uIHRoZSBhY3R1YWwgcGFpbnQgY29sb3IuIFdoaXRlIGNhcnMgaW4gc21va2UgYXJlIHN0aWxsICJ3aGl0ZSIuIE9ubHkgc2F5ICJzaWx2ZXItZ3JleSIgZm9yIGFjdHVhbCBtZXRhbGxpYyBzaWx2ZXIvZ3JleSBwYWludC4gVGVhbC90dXJxdW9pc2UvY3lhbiA9ICJibHVlIi4gUmVwbHkgd2l0aCBFWEFDVExZIG9uZSBjb2xvciBwZXIgbGluZSwgaW4gb3JkZXIuIEVhY2ggbGluZSBtdXN0IGJlIE9ORSB3b3JkIGZyb206IHJlZCwgYmx1ZSwgZ3JlZW4sIHllbGxvdywgb3JhbmdlLCBwdXJwbGUsIHBpbmssIGJyb3duLCBibGFjaywgd2hpdGUsIHNpbHZlci1ncmV5', 'base64').toString('utf8');
+
+const COLOR_MAP = {
+    'silver': 'silver-grey', 'grey': 'silver-grey', 'gray': 'silver-grey',
+    'silvergrey': 'silver-grey', 'silvergray': 'silver-grey',
+    'maroon': 'red', 'burgundy': 'red', 'crimson': 'red',
+    'navy': 'blue', 'teal': 'blue', 'cyan': 'blue', 'turquoise': 'blue',
+    'gold': 'yellow', 'cream': 'white', 'ivory': 'white', 'beige': 'white',
+    'olive': 'green', 'lime': 'green', 'magenta': 'pink', 'tan': 'brown',
+};
+
+function parseColorLines(rawText, expectedCount) {
+    const lines = rawText.split(/\n/).map(l => l.trim().toLowerCase().replace(/[^a-z-]/g, '').replace(/^\d+\.?\s*/, ''));
+    const results = [];
+    for (let i = 0; i < expectedCount; i++) {
+        const raw = lines[i] || '';
+        const mapped = COLOR_MAP[raw] || raw;
+        if (VALID_COLORS.has(mapped)) {
+            results.push({ category: mapped, confidence: 0.95 });
+        } else {
+            results.push(null);
+        }
+    }
+    return results;
+}
+
+async function classifyBatchWithGemini(imageBuffers) {
+    if (!GEMINI_API_KEY || imageBuffers.length === 0) return null;
+    try {
+        // Build Gemini parts: images + text prompt
+        const parts = [];
+        for (const buf of imageBuffers) {
+            parts.push({
+                inline_data: {
+                    mime_type: 'image/jpeg',
+                    data: buf.toString('base64'),
+                },
+            });
+        }
+        parts.push({ text: `There are ${imageBuffers.length} photos above (numbered 1 to ${imageBuffers.length}). ${COLOR_PROMPT}` });
+
+        const res = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    contents: [{ parts }],
+                    generationConfig: {
+                        maxOutputTokens: 200,
+                        temperature: 0,
+                        thinkingConfig: { thinkingBudget: 0 },
+                    },
+                }),
+                signal: AbortSignal.timeout(20000),
+            }
+        );
+
+        if (!res.ok) {
+            const errText = await res.text();
+            console.error(`[gemini-batch] API error ${res.status}: ${errText.slice(0, 200)}`);
+            return null;
+        }
+
+        const data = await res.json();
+        const rawText = (data.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
+        const results = parseColorLines(rawText, imageBuffers.length);
+        const method = 'gemini-flash-batch';
+        results.forEach(r => { if (r) r.method = method; });
+
+        const validCount = results.filter(r => r !== null).length;
+        console.log(`  [gemini-batch] ${validCount}/${imageBuffers.length} classified: ${results.map(r => r?.category || '?').join(', ')}`);
+        return results;
+    } catch (err) {
+        console.error(`[gemini-batch] Failed: ${err.message}`);
+        return null;
+    }
+}
+
+// ─── Unified batch dispatch: routes to active engine ───
+function getVisionBatchSize() {
+    const engine = getActiveEngine();
+    if (engine === 'gemini') return GEMINI_BATCH_SIZE;
+    if (engine === 'claude') return CLAUDE_BATCH_SIZE;
+    return 1; // local processes one at a time
+}
+
+async function classifyBatchVision(imageBuffers) {
+    const engine = getActiveEngine();
+    if (engine === 'gemini') return classifyBatchWithGemini(imageBuffers);
+    if (engine === 'claude') return classifyBatchWithClaude(imageBuffers);
+    return null; // local fallback handled by caller
 }
 
 // ─── Nyckel API configuration (from environment variables) ───
@@ -1109,7 +1228,7 @@ async function analyzeImageColor(imagePath) {
         // For single-image calls (non-batch). Batch mode bypasses this entirely.
         if (CLAUDE_API_KEY && !imagePath._batchResult) {
             try {
-                const jpegBuffer = await prepareImageForClaude(imagePath);
+                const jpegBuffer = await prepareImageForApi(imagePath);
                 const claudeResult = await classifyWithClaude(jpegBuffer);
                 if (claudeResult) {
                     return {
@@ -1914,11 +2033,16 @@ app.post('/sort-local', async (req, res) => {
                     if (session.status === 'cancelled') throw new Error('CANCELLED');
                 }
 
-                // ── BATCH + CONCURRENT PROCESSING: 3 workers × 6 images per batch = 18 images per cycle ──
-                const BATCH_CONCURRENCY = 3; // Number of parallel batch API calls
+                // ── BATCH + CONCURRENT PROCESSING ──
+                // Gemini: 3 workers × 15 images = 45 images per cycle
+                // Claude: 3 workers × 6 images = 18 images per cycle
+                const BATCH_CONCURRENCY = 3;
+                const activeBatchSize = getVisionBatchSize();
+                const activeEngine = getActiveEngine();
+                console.log(`[${sessionId}] Engine: ${activeEngine}, batch: ${activeBatchSize}, concurrency: ${BATCH_CONCURRENCY}`);
                 let cancelled = false;
-                // Pre-read cache: start reading next batch while current batch is classifying
-                const preReadCache = new Map(); // filePath → Promise<Buffer|null>
+                const preReadCache = new Map();
+                const pendingThumbs = []; // Generate thumbs async after classification
 
                 function grabBatch(maxSize) {
                     const batch = [];
@@ -1928,12 +2052,11 @@ app.post('/sort-local', async (req, res) => {
                     return batch;
                 }
 
-                // Pre-read upcoming files into cache (overlaps disk I/O with API latency)
                 function preReadAhead(count) {
                     const upcoming = pendingFiles.slice(0, count);
                     for (const fp of upcoming) {
                         if (!preReadCache.has(fp)) {
-                            preReadCache.set(fp, prepareImageForClaude(fp).catch(() => null));
+                            preReadCache.set(fp, prepareImageForApi(fp).catch(() => null));
                         }
                     }
                 }
@@ -1944,23 +2067,23 @@ app.post('/sort-local', async (req, res) => {
                     if (cancelled || session.status === 'cancelled') { cancelled = true; return; }
 
                     // Pre-read next batch while we process this one
-                    preReadAhead(BATCH_SIZE * BATCH_CONCURRENCY);
+                    preReadAhead(activeBatchSize * BATCH_CONCURRENCY);
 
-                    // Prepare all images for Claude — use pre-read cache if available
+                    // Prepare all images — use pre-read cache if available
                     const buffers = await Promise.all(
                         batchFiles.map(fp => {
                             const cached = preReadCache.get(fp);
                             if (cached) { preReadCache.delete(fp); return cached; }
-                            return prepareImageForClaude(fp).catch(() => null);
+                            return prepareImageForApi(fp).catch(() => null);
                         })
                     );
                     const validIndices = buffers.map((b, i) => b ? i : -1).filter(i => i >= 0);
                     const validBuffers = validIndices.map(i => buffers[i]);
 
-                    // Batch classify with Claude Vision
+                    // Batch classify with active vision engine (Gemini/Claude/local)
                     let batchResults = null;
-                    if (CLAUDE_API_KEY && validBuffers.length > 0) {
-                        batchResults = await classifyBatchWithClaude(validBuffers);
+                    if (activeEngine !== 'local' && validBuffers.length > 0) {
+                        batchResults = await classifyBatchVision(validBuffers);
                     }
 
                     // Process each file in the batch
@@ -1973,20 +2096,22 @@ app.post('/sort-local', async (req, res) => {
                             let colorInfo;
                             const validIdx = validIndices.indexOf(bi);
                             if (batchResults && validIdx >= 0 && batchResults[validIdx]) {
-                                // Use batch result
                                 colorInfo = {
                                     rgb: [128, 128, 128],
                                     category: batchResults[validIdx].category,
                                     hex: '#808080',
                                     confidence: 'high',
-                                    method: 'claude-vision-batch',
+                                    method: batchResults[validIdx].method || activeEngine + '-batch',
                                 };
                             } else {
-                                // Fallback to single-image analysis
+                                // Fallback to local analysis
                                 colorInfo = await analyzeImageColor(filePath);
                             }
 
-                            const thumbUrl = await generateThumb(filePath, sessionId, `${processedCount}_${file}`);
+                            // Fire-and-forget thumbnail — don't block classification
+                            const thumbIdx = processedCount;
+                            const thumbPromise = generateThumb(filePath, sessionId, `${thumbIdx}_${file}`).catch(() => null);
+                            pendingThumbs.push({ promise: thumbPromise, idx: thumbIdx });
 
                             const needsReview = colorInfo.category === 'unknown' || colorInfo.confidence === 'none' || colorInfo.confidence === 'very-low';
                             const folderName = needsReview ? 'please-double-check' : colorInfo.category;
@@ -2007,10 +2132,17 @@ app.post('/sort-local', async (req, res) => {
                             session.currentFile = file;
                             session.processed = processedCount;
 
+                            // Resolve thumb asynchronously — UI can show placeholder until ready
+                            thumbPromise.then(thumbUrl => {
+                                const result = session.results.find(r => r.filename === file && r._thumbIdx === thumbIdx);
+                                if (result) result.thumb = thumbUrl;
+                            });
+
                             session.results.push({
                                 filename: file, color: folderName, hex: colorInfo.hex, rgb: colorInfo.rgb,
-                                thumb: thumbUrl, confidence: colorInfo.confidence || 'unknown',
-                                needsReview, status: needsReview ? 'Needs Review' : 'Success'
+                                thumb: null, confidence: colorInfo.confidence || 'unknown',
+                                needsReview, status: needsReview ? 'Needs Review' : 'Success',
+                                _thumbIdx: thumbIdx,
                             });
                         } catch (err) {
                             console.error(`[${sessionId}][w${workerIdx}] Failed ${file}: ${err.message}`);
@@ -2033,7 +2165,7 @@ app.post('/sort-local', async (req, res) => {
                             continue;
                         }
 
-                        const batch = grabBatch(BATCH_SIZE);
+                        const batch = grabBatch(activeBatchSize);
                         if (batch.length === 0) continue;
 
                         try {
@@ -2050,9 +2182,15 @@ app.post('/sort-local', async (req, res) => {
                 // Wait for extraction to fully complete (should already be done)
                 await extractionPromise;
 
+                // Wait for any remaining thumbnails to finish (non-blocking during classification)
+                if (pendingThumbs.length > 0) {
+                    await Promise.allSettled(pendingThumbs.map(t => t.promise));
+                }
+
                 session.status = 'completed';
                 session.currentFile = '';
-                console.log(`[${sessionId}] Pipeline complete! ${processedCount} images sorted into ${Object.keys(session.colorCounts).length} colors.`);
+                session.engine = activeEngine;
+                console.log(`[${sessionId}] Pipeline complete! ${processedCount} images sorted into ${Object.keys(session.colorCounts).length} colors (engine: ${activeEngine}).`);
             } catch (err) {
                 if (err.message === 'CANCELLED') {
                     session.currentFile = '';
@@ -2354,8 +2492,14 @@ app.get('/health', (req, res) => {
         ssdModelExists: fs.existsSync(SSD_MODEL_PATH),
         segModelPath: SEGFORMER_MODEL_PATH,
         segModelExists: fs.existsSync(SEGFORMER_MODEL_PATH),
-        claudeVision: CLAUDE_API_KEY ? 'active' : 'not configured',
-        pipeline: CLAUDE_API_KEY
+        visionEngine: getActiveEngine(),
+        visionEngineConfig: VISION_ENGINE,
+        geminiKey: GEMINI_API_KEY ? 'set' : 'not set',
+        claudeKey: CLAUDE_API_KEY ? 'set' : 'not set',
+        batchSize: getVisionBatchSize(),
+        pipeline: getActiveEngine() === 'gemini'
+            ? 'Gemini 2.5 Flash (PRIMARY) → local LAB (fallback)'
+            : getActiveEngine() === 'claude'
             ? 'Claude Vision (PRIMARY) → local LAB (fallback)'
             : segformerSession
                 ? 'SSD bbox → SegFormer pixel mask → pure vehicle pixels → Nyckel+LAB → merge'

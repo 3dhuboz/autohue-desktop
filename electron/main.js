@@ -102,28 +102,30 @@ app.whenReady().then(async () => {
     }
   }
 
-  // 3. Try to get Claude API key — check custom key first, then platform key
+  // 3. Get API keys — Claude + Gemini
   const customKeyRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('claude_api_key');
   const claudeKey = (customKeyRow ? customKeyRow.value : null) || licenseManager.getClaudeApiKey();
-  if (claudeKey) {
-    console.log(`[main] Claude Vision API key available (${customKeyRow ? 'custom' : 'platform'}) — enabling fast pipeline`);
-  }
+  const geminiKeyRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('gemini_api_key');
+  const geminiKey = geminiKeyRow ? geminiKeyRow.value : null;
+  const engineRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('vision_engine');
+  const visionEngine = engineRow ? engineRow.value : 'auto';
+  if (geminiKey) console.log('[main] Gemini API key available — high-speed classifier enabled');
+  if (claudeKey) console.log(`[main] Claude Vision API key available (${customKeyRow ? 'custom' : 'platform'})`);
 
   // 4. Start the AI worker process
   const storagePath = path.join(app.getPath('userData'), 'worker-data');
   const fs = require('fs');
   fs.mkdirSync(storagePath, { recursive: true });
-  // Write keyfile so worker can read it directly (belt + suspenders + duct tape)
-  const keyFilePath = path.join(storagePath, '.claude-key');
-  if (claudeKey) {
-    fs.writeFileSync(keyFilePath, claudeKey, 'utf8');
-    console.log(`[main] Wrote Claude key to ${keyFilePath}`);
-  } else {
-    // Remove stale keyfile if no key
-    try { fs.unlinkSync(keyFilePath); } catch {}
-  }
+  // Write keyfiles so worker can read them directly
+  const claudeKeyPath = path.join(storagePath, '.claude-key');
+  const geminiKeyPath = path.join(storagePath, '.gemini-key');
+  if (claudeKey) { fs.writeFileSync(claudeKeyPath, claudeKey, 'utf8'); } else { try { fs.unlinkSync(claudeKeyPath); } catch {} }
+  if (geminiKey) { fs.writeFileSync(geminiKeyPath, geminiKey, 'utf8'); } else { try { fs.unlinkSync(geminiKeyPath); } catch {} }
+
   workerManager = new WorkerManager(storagePath);
   if (claudeKey) workerManager.setClaudeApiKey(claudeKey);
+  if (geminiKey) workerManager.setGeminiApiKey(geminiKey);
+  workerManager.visionEngine = visionEngine;
   workerManager.start().catch(err => {
     console.error('Worker failed to start:', err.message);
   });
@@ -250,11 +252,16 @@ ipcMain.handle('settings:getClaudeKey', () => {
 
   const license = licenseManager.getCurrent();
   const tier = (license.tier || '').toLowerCase();
+  const geminiRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('gemini_api_key');
+  const hasGemini = !!(geminiRow && geminiRow.value);
+  const engineRow2 = db.prepare('SELECT value FROM settings WHERE key = ?').get('vision_engine');
   return {
     hasKey: !!activeKey,
+    hasGeminiKey: hasGemini,
     source: customKey ? 'custom' : platformKey ? 'platform' : 'none',
     eligible: ['pro', 'unlimited'].includes(tier) || license.isUnlimited === true || license.active,
     tier,
+    visionEngine: engineRow2 ? engineRow2.value : 'auto',
   };
 });
 
@@ -276,6 +283,42 @@ ipcMain.handle('settings:setClaudeKey', (_, key) => {
     if (workerManager && platformKey) workerManager.setClaudeApiKey(platformKey);
   }
   return true;
+});
+
+// ─── Gemini API Key ───
+ipcMain.handle('settings:setGeminiKey', (_, key) => {
+  const fs = require('fs');
+  const storagePath = path.join(app.getPath('userData'), 'worker-data');
+  const keyFilePath = path.join(storagePath, '.gemini-key');
+  if (key) {
+    db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('gemini_api_key', key);
+    fs.mkdirSync(storagePath, { recursive: true });
+    fs.writeFileSync(keyFilePath, key, 'utf8');
+    if (workerManager) workerManager.setGeminiApiKey(key);
+    console.log('[main] Gemini key saved to DB + keyfile + sent to worker');
+  } else {
+    db.prepare('DELETE FROM settings WHERE key = ?').run('gemini_api_key');
+    try { fs.unlinkSync(keyFilePath); } catch {}
+  }
+  return true;
+});
+
+ipcMain.handle('settings:getGeminiKey', () => {
+  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get('gemini_api_key');
+  return { hasKey: !!(row && row.value) };
+});
+
+// ─── Vision Engine Selection ───
+ipcMain.handle('settings:setVisionEngine', (_, engine) => {
+  db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('vision_engine', engine);
+  if (workerManager) workerManager.setVisionEngine(engine);
+  console.log(`[main] Vision engine set to: ${engine}`);
+  return true;
+});
+
+ipcMain.handle('settings:getVisionEngine', () => {
+  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get('vision_engine');
+  return row ? row.value : 'auto';
 });
 
 // ─── History ───

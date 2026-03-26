@@ -82,12 +82,19 @@ export default function SettingsPage({ license, onRefresh }: Props) {
   const [customKey, setCustomKey] = useState('');
   const [showKeyInput, setShowKeyInput] = useState(false);
   const [keySaving, setKeySaving] = useState(false);
+  const [geminiKey, setGeminiKey] = useState('');
+  const [geminiStatus, setGeminiStatus] = useState<{ hasKey: boolean } | null>(null);
+  const [showGeminiInput, setShowGeminiInput] = useState(false);
+  const [geminiSaving, setGeminiSaving] = useState(false);
+  const [visionEngine, setVisionEngine] = useState('auto');
 
   useEffect(() => {
     window.electronAPI.getVersion().then(setVersion);
     window.electronAPI.getUserDataPath().then(setUserDataPath);
     window.electronAPI.getSetting('output_folder').then(v => setOutputFolder(v || ''));
     window.electronAPI.getClaudeKeyStatus().then(setClaudeStatus);
+    window.electronAPI.getGeminiKeyStatus().then(setGeminiStatus);
+    window.electronAPI.getVisionEngine().then(setVisionEngine);
   }, []);
 
   const handleSelectOutput = async () => {
@@ -278,10 +285,102 @@ export default function SettingsPage({ license, onRefresh }: Props) {
               <span className="text-[11px] text-white/40 capitalize">{health.segformer || 'Loading\u2026'}</span>
             </div>
 
-            {/* AI Vision Pro */}
+            {/* ─── Vision Engine Selector ─── */}
             <div className="h-px bg-white/[0.04]" />
 
-            <div className="py-2 px-1">
+            <div className="py-2 px-1 space-y-3">
+              <div>
+                <span className="text-[10px] text-white/30 uppercase tracking-wider block mb-2">Vision Engine</span>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { id: 'auto', label: 'Auto', desc: 'Best available' },
+                    { id: 'gemini', label: 'Gemini Flash', desc: 'Fastest' },
+                    { id: 'claude', label: 'Claude', desc: 'High accuracy' },
+                  ].map(opt => (
+                    <button
+                      key={opt.id}
+                      onClick={async () => {
+                        setVisionEngine(opt.id);
+                        await window.electronAPI.setVisionEngine(opt.id);
+                      }}
+                      className={`p-2.5 rounded-lg border text-center transition-all ${
+                        visionEngine === opt.id
+                          ? 'border-racing-500/50 bg-racing-500/10 text-racing-400'
+                          : 'border-white/[0.06] bg-white/[0.02] text-white/40 hover:border-white/10'
+                      }`}
+                    >
+                      <span className="text-xs font-heading font-bold block">{opt.label}</span>
+                      <span className="text-[9px] opacity-60">{opt.desc}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Gemini API Key */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <StatusDot
+                    color={geminiStatus?.hasKey ? 'green' : 'yellow'}
+                    pulse={!!geminiStatus?.hasKey}
+                  />
+                  <div>
+                    <span className="text-xs text-white/70 font-heading font-bold block">Gemini 2.5 Flash</span>
+                    <span className="text-[10px] text-white/30">
+                      {geminiStatus?.hasKey ? 'Active — high-speed classifier' : 'Add key for fastest processing'}
+                    </span>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowGeminiInput(!showGeminiInput)}
+                  className="text-[11px] text-racing-400 hover:text-racing-300 transition-colors"
+                >
+                  {showGeminiInput ? 'Hide' : geminiStatus?.hasKey ? 'Change key' : 'Configure'}
+                </button>
+              </div>
+
+              {showGeminiInput && (
+                <div className="space-y-2">
+                  <div className="flex gap-2">
+                    <input
+                      type="password"
+                      placeholder="AIza... (Google AI Studio key)"
+                      value={geminiKey}
+                      onChange={e => setGeminiKey(e.target.value)}
+                      className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs text-white/60 font-mono placeholder:text-white/20 focus:outline-none focus:border-racing-500/50"
+                    />
+                    <button
+                      onClick={async () => {
+                        setGeminiSaving(true);
+                        await window.electronAPI.setGeminiKey(geminiKey);
+                        const status = await window.electronAPI.getGeminiKeyStatus();
+                        setGeminiStatus(status);
+                        setGeminiSaving(false);
+                        setShowGeminiInput(false);
+                        setGeminiKey('');
+                      }}
+                      disabled={geminiSaving}
+                      className="btn-racing px-4 py-2 rounded-lg text-xs shrink-0"
+                    >
+                      {geminiSaving ? 'Saving...' : 'Save'}
+                    </button>
+                  </div>
+                  {geminiStatus?.hasKey && (
+                    <button
+                      onClick={async () => {
+                        await window.electronAPI.setGeminiKey('');
+                        const status = await window.electronAPI.getGeminiKeyStatus();
+                        setGeminiStatus(status);
+                      }}
+                      className="text-[10px] text-white/30 hover:text-red-400 transition-colors"
+                    >
+                      Remove Gemini key
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* Claude API Key (secondary) */}
+              <div className="h-px bg-white/[0.04]" />
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2.5">
                   <StatusDot
@@ -289,12 +388,12 @@ export default function SettingsPage({ license, onRefresh }: Props) {
                     pulse={!!claudeStatus?.hasKey}
                   />
                   <div>
-                    <span className="text-xs text-white/70 font-heading font-bold block">AI Vision Pro</span>
+                    <span className="text-xs text-white/70 font-heading font-bold block">Claude Vision</span>
                     <span className="text-[10px] text-white/30">
                       {claudeStatus?.hasKey
-                        ? `Active — enhanced accuracy & speed`
+                        ? 'Active — fallback classifier'
                         : claudeStatus?.eligible
-                        ? 'Available — configure to enable fast mode'
+                        ? 'Available — configure as backup'
                         : 'Pro or Unlimited plan required'}
                     </span>
                   </div>
@@ -310,7 +409,7 @@ export default function SettingsPage({ license, onRefresh }: Props) {
               </div>
 
               {showKeyInput && claudeStatus?.eligible && (
-                <div className="mt-3 space-y-2">
+                <div className="space-y-2">
                   <div className="flex gap-2">
                     <input
                       type="password"

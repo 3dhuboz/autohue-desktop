@@ -21,9 +21,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getSetting: (key) => ipcRenderer.invoke('settings:get', key),
   setSetting: (key, value) => ipcRenderer.invoke('settings:set', key, value),
 
-  // Claude Vision API
+  // Vision API keys + engine
   getClaudeKeyStatus: () => ipcRenderer.invoke('settings:getClaudeKey'),
   setClaudeKey: (key) => ipcRenderer.invoke('settings:setClaudeKey', key),
+  getGeminiKeyStatus: () => ipcRenderer.invoke('settings:getGeminiKey'),
+  setGeminiKey: (key) => ipcRenderer.invoke('settings:setGeminiKey', key),
+  getVisionEngine: () => ipcRenderer.invoke('settings:getVisionEngine'),
+  setVisionEngine: (engine) => ipcRenderer.invoke('settings:setVisionEngine', engine),
 
   // History
   getHistory: () => ipcRenderer.invoke('history:list'),

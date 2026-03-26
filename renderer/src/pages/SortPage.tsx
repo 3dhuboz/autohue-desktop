@@ -662,18 +662,21 @@ export default function SortPage() {
               <p className="text-white/30 text-sm mt-1">
                 {paused ? 'Processing is paused — you can navigate away safely' : 'AI is detecting cars and classifying colors'}
               </p>
-              {stats.results.length > 0 && stats.results[stats.results.length - 1] && (
-                <span className={`inline-flex items-center gap-1.5 mt-2 px-2.5 py-1 rounded-full text-[10px] font-bold ${
-                  (stats.results[stats.results.length - 1] as any).method === 'claude-vision'
-                    ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20'
-                    : 'bg-white/5 text-white/30 border border-white/10'
-                }`}>
-                  <span className={`w-1.5 h-1.5 rounded-full ${
-                    (health?.claudeVision === 'active' || stats.results.some((r: any) => r.confidence === 'high')) ? 'bg-purple-400' : 'bg-white/30'
-                  }`} />
-                  {(health?.claudeVision === 'active' || stats.results.some((r: any) => r.confidence === 'high')) ? 'AI Vision Pro' : 'Local AI'}
-                </span>
-              )}
+              {stats.results.length > 0 && (() => {
+                const lastMethod = (stats.results[stats.results.length - 1] as any)?.method || '';
+                const isApiEngine = lastMethod.includes('gemini') || lastMethod.includes('claude') || stats.results.some((r: any) => r.confidence === 'high');
+                const engineLabel = lastMethod.includes('gemini') ? 'Gemini Flash' : lastMethod.includes('claude') ? 'Claude Vision' : isApiEngine ? 'AI Vision Pro' : 'Local AI';
+                return (
+                  <span className={`inline-flex items-center gap-1.5 mt-2 px-2.5 py-1 rounded-full text-[10px] font-bold ${
+                    isApiEngine
+                      ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20'
+                      : 'bg-white/5 text-white/30 border border-white/10'
+                  }`}>
+                    <span className={`w-1.5 h-1.5 rounded-full ${isApiEngine ? 'bg-purple-400' : 'bg-white/30'}`} />
+                    {engineLabel}
+                  </span>
+                );
+              })()}
               <div className="flex items-center justify-center gap-3 mt-4">
                 {paused ? (
                   <button

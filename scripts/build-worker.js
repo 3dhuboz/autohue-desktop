@@ -16,13 +16,15 @@ if (fs.existsSync(DIST)) fs.rmSync(DIST, { recursive: true });
 fs.mkdirSync(DIST, { recursive: true });
 
 // 1. Bundle with esbuild — only externalize native modules with .node bindings
-console.log('[build-worker] Bundling with esbuild...');
+console.log('[build-worker] Bundling with esbuild (minified)...');
 execSync([
   'npx esbuild worker/server.js',
   '--bundle',
   '--platform=node',
   '--target=node20',
   '--outfile=worker/dist/server.js',
+  '--minify',                     // Protect IP: minify variable names + whitespace
+  '--legal-comments=none',        // Strip all comments
   '--external:onnxruntime-node',  // native .node binding
   '--external:node-unrar-js',     // native .node binding (wasm)
   '--external:sharp',             // native libvips binding
