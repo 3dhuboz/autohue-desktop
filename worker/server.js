@@ -2407,33 +2407,50 @@ app.get('/status/:sessionId', (req, res) => {
     });
 });
 
-// ─── Download endpoint ───
-app.get('/download/:sessionId', (req, res) => {
+// ─── Download endpoint — pre-build ZIP to disk, then serve ───
+app.get('/download/:sessionId', async (req, res) => {
     const sessionId = req.params.sessionId;
     const session = sessions[sessionId];
 
-    // Allow download if session completed OR output dir exists on disk (survives redeployment)
     const outputDir = path.join(OUTPUT_DIR, sessionId);
     if (!fs.existsSync(outputDir)) {
         return res.status(400).json({ error: 'Session output not found' });
     }
-    if (session && session.status !== 'completed') {
+    if (session && session.status !== 'completed' && session.status !== 'cancelled') {
         return res.status(400).json({ error: 'Session still processing' });
     }
 
     const zipFilename = `car_photos_${sessionId}.zip`;
+    const zipPath = path.join(OUTPUT_DIR, zipFilename);
 
-    res.setHeader('Content-Type', 'application/zip');
-    res.setHeader('Content-Disposition', `attachment; filename=${zipFilename}`);
+    try {
+        // Build ZIP to disk first (if not already built)
+        if (!fs.existsSync(zipPath)) {
+            console.log(`[download] Building ZIP: ${zipFilename}`);
+            await new Promise((resolve, reject) => {
+                const output = fs.createWriteStream(zipPath);
+                const archive = archiver('zip', { zlib: { level: 1 } });
+                output.on('close', resolve);
+                archive.on('error', reject);
+                archive.pipe(output);
+                archive.directory(outputDir, false);
+                archive.finalize();
+            });
+            console.log(`[download] ZIP ready: ${(fs.statSync(zipPath).size / 1024 / 1024).toFixed(1)} MB`);
+        }
 
-    const archive = archiver('zip', { zlib: { level: 1 } }); // Fast compression for large batches
-    archive.on('error', (err) => {
-        console.error(`[download] Archive error: ${err.message}`);
+        // Serve the completed file
+        const stat = fs.statSync(zipPath);
+        res.setHeader('Content-Type', 'application/zip');
+        res.setHeader('Content-Length', stat.size);
+        res.setHeader('Content-Disposition', `attachment; filename="${zipFilename}"`);
+        fs.createReadStream(zipPath).pipe(res);
+    } catch (err) {
+        console.error(`[download] Failed: ${err.message}`);
+        // Clean up partial ZIP
+        try { fs.unlinkSync(zipPath); } catch {}
         if (!res.headersSent) res.status(500).json({ error: 'Failed to create ZIP' });
-    });
-    archive.pipe(res);
-    archive.directory(outputDir, false);
-    archive.finalize();
+    }
 });
 
 // ─── Browse a color folder's images ───
