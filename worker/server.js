@@ -44,28 +44,28 @@ let VISION_MODEL = process.env.VISION_MODEL || 'google/gemini-2.0-flash-001';
 let keyIndex = 0;
 const keyBackoff = new Map(); // key → timestamp when it can be used again
 
-// Load keys from env (comma-separated) or keyfile
+// Load keys from ALL sources and merge (deduplicated)
+const keySet = new Set();
+// Source 1: env var (comma-separated)
 if (process.env.OPENROUTER_KEY) {
-    OPENROUTER_KEYS = process.env.OPENROUTER_KEY.split(',').map(k => k.trim()).filter(Boolean);
+    process.env.OPENROUTER_KEY.split(',').map(k => k.trim()).filter(Boolean).forEach(k => keySet.add(k));
 }
-if (OPENROUTER_KEYS.length === 0) {
-    try {
-        const keyFile = path.join(STORAGE_ROOT, '.openrouter-keys');
-        if (fs.existsSync(keyFile)) {
-            OPENROUTER_KEYS = fs.readFileSync(keyFile, 'utf8').trim().split('\n').map(k => k.trim()).filter(Boolean);
-        }
-    } catch {}
-}
-// Fallback: single key file
-if (OPENROUTER_KEYS.length === 0) {
-    try {
-        const keyFile = path.join(STORAGE_ROOT, '.openrouter-key');
-        if (fs.existsSync(keyFile)) {
-            const k = fs.readFileSync(keyFile, 'utf8').trim();
-            if (k) OPENROUTER_KEYS = [k];
-        }
-    } catch {}
-}
+// Source 2: multi-key file
+try {
+    const keyFile = path.join(STORAGE_ROOT, '.openrouter-keys');
+    if (fs.existsSync(keyFile)) {
+        fs.readFileSync(keyFile, 'utf8').trim().split('\n').map(k => k.trim()).filter(Boolean).forEach(k => keySet.add(k));
+    }
+} catch {}
+// Source 3: single-key file (legacy)
+try {
+    const keyFile = path.join(STORAGE_ROOT, '.openrouter-key');
+    if (fs.existsSync(keyFile)) {
+        const k = fs.readFileSync(keyFile, 'utf8').trim();
+        if (k) keySet.add(k);
+    }
+} catch {}
+OPENROUTER_KEYS = [...keySet];
 
 console.log(`[config] OpenRouter keys: ${OPENROUTER_KEYS.length}`);
 
@@ -2173,51 +2173,13 @@ app.post('/sort-local', async (req, res) => {
 
                 // Extract everything
                 if (/\.zip$/i.test(inputPath)) {
-                    let pendingWrites = 0;
-                    await new Promise((resolve) => {
-                        fs.createReadStream(inputPath)
-                            .pipe(unzipper.Parse())
-                            .on('entry', (entry) => {
-                                const fileName = path.basename(entry.path);
-                                if (/\.(jpg|jpeg|png|gif|bmp|webp)$/i.test(fileName) && !fileName.startsWith('.') && !fileName.startsWith('__')) {
-                                    extractedCount++;
-                                    pendingWrites++;
-                                    let destName = fileName;
-                                    let c = 1;
-                                    while (fs.existsSync(path.join(extractDir, destName))) {
-                                        const ext = path.extname(fileName);
-                                        destName = `${path.basename(fileName, ext)}_${c}${ext}`;
-                                        c++;
-                                    }
-                                    const destPath = path.join(extractDir, destName);
-                                    const ws = fs.createWriteStream(destPath);
-                                    entry.pipe(ws);
-                                    ws.on('finish', () => {
-                                        pendingWrites--;
-                                        session.extracted = extractedCount - pendingWrites;
-                                    });
-                                    session.currentFile = `Extracting: ${destName} (${extractedCount}/${session.total || '?'})`;
-                                } else {
-                                    entry.autodrain();
-                                }
-                            })
-                            .on('close', () => {
-                                const waitForWrites = () => {
-                                    if (pendingWrites <= 0) resolve();
-                                    else setTimeout(waitForWrites, 100);
-                                };
-                                waitForWrites();
-                            })
-                            .on('error', (err) => {
-                                // ZIP may have trailing corruption but images are already extracted
-                                console.warn(`[${sessionId}] ZIP stream error (continuing): ${err.message}`);
-                                const waitForWrites = () => {
-                                    if (pendingWrites <= 0) resolve();
-                                    else setTimeout(waitForWrites, 100);
-                                };
-                                setTimeout(waitForWrites, 500); // brief delay for final writes
-                            });
-                    });
+                    try {
+                        await extractZip(inputPath, extractDir, session);
+                    } catch (zipErr) {
+                        console.warn(`[${sessionId}] ZIP extraction error (continuing): ${zipErr.message}`);
+                    }
+                    // Always continue — count whatever was extracted
+                    extractedCount = fs.readdirSync(extractDir).filter(f => /\.(jpg|jpeg|png|gif|bmp|webp)$/i.test(f)).length;
                     console.log(`[${sessionId}] Extraction finished: ${extractedCount} files`);
                 } else if (/\.rar$/i.test(inputPath)) {
                     await extractRar(inputPath, extractDir, session);
