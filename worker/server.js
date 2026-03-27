@@ -2173,51 +2173,13 @@ app.post('/sort-local', async (req, res) => {
 
                 // Extract everything
                 if (/\.zip$/i.test(inputPath)) {
-                    let pendingWrites = 0;
-                    await new Promise((resolve) => {
-                        fs.createReadStream(inputPath)
-                            .pipe(unzipper.Parse())
-                            .on('entry', (entry) => {
-                                const fileName = path.basename(entry.path);
-                                if (/\.(jpg|jpeg|png|gif|bmp|webp)$/i.test(fileName) && !fileName.startsWith('.') && !fileName.startsWith('__')) {
-                                    extractedCount++;
-                                    pendingWrites++;
-                                    let destName = fileName;
-                                    let c = 1;
-                                    while (fs.existsSync(path.join(extractDir, destName))) {
-                                        const ext = path.extname(fileName);
-                                        destName = `${path.basename(fileName, ext)}_${c}${ext}`;
-                                        c++;
-                                    }
-                                    const destPath = path.join(extractDir, destName);
-                                    const ws = fs.createWriteStream(destPath);
-                                    entry.pipe(ws);
-                                    ws.on('finish', () => {
-                                        pendingWrites--;
-                                        session.extracted = extractedCount - pendingWrites;
-                                    });
-                                    session.currentFile = `Extracting: ${destName} (${extractedCount}/${session.total || '?'})`;
-                                } else {
-                                    entry.autodrain();
-                                }
-                            })
-                            .on('close', () => {
-                                const waitForWrites = () => {
-                                    if (pendingWrites <= 0) resolve();
-                                    else setTimeout(waitForWrites, 100);
-                                };
-                                waitForWrites();
-                            })
-                            .on('error', (err) => {
-                                // ZIP may have trailing corruption but images are already extracted
-                                console.warn(`[${sessionId}] ZIP stream error (continuing): ${err.message}`);
-                                const waitForWrites = () => {
-                                    if (pendingWrites <= 0) resolve();
-                                    else setTimeout(waitForWrites, 100);
-                                };
-                                setTimeout(waitForWrites, 500); // brief delay for final writes
-                            });
-                    });
+                    try {
+                        await extractZip(inputPath, extractDir, session);
+                    } catch (zipErr) {
+                        console.warn(`[${sessionId}] ZIP extraction error (continuing): ${zipErr.message}`);
+                    }
+                    // Always continue — count whatever was extracted
+                    extractedCount = fs.readdirSync(extractDir).filter(f => /\.(jpg|jpeg|png|gif|bmp|webp)$/i.test(f)).length;
                     console.log(`[${sessionId}] Extraction finished: ${extractedCount} files`);
                 } else if (/\.rar$/i.test(inputPath)) {
                     await extractRar(inputPath, extractDir, session);
