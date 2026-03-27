@@ -139,7 +139,7 @@ class WorkerManager {
   }
 
   /** Poll /health until the worker responds. */
-  async _waitForReady(retries = 40, interval = 500) {
+  async _waitForReady(retries = 120, interval = 500) {
     for (let i = 0; i < retries; i++) {
       try {
         const res = await fetch(`http://127.0.0.1:${this.port}/health`);

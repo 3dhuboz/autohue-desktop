@@ -2748,7 +2748,7 @@ app.get('/health', (req, res) => {
         segModelPath: SEGFORMER_MODEL_PATH,
         segModelExists: fs.existsSync(SEGFORMER_MODEL_PATH),
         visionEngine: getActiveEngine(),
-        apiKey: OPENROUTER_KEY ? 'set' : (CLAUDE_API_KEY ? 'set' : 'not set'),
+        apiKey: OPENROUTER_KEYS.length > 0 ? 'set' : (CLAUDE_API_KEY ? 'set' : 'not set'),
         batchSize: getVisionBatchSize(),
         pipeline: getActiveEngine() !== 'local'
             ? 'AI Vision Pro (PRIMARY) → local LAB (fallback)'
@@ -2765,7 +2765,7 @@ app.get('/health', (req, res) => {
 
 // ─── Test OpenRouter connectivity ───
 app.post('/test-openrouter', express.json(), async (req, res) => {
-    const key = req.body?.key || OPENROUTER_KEY;
+    const key = req.body?.key || getNextKey();
     if (!key) return res.json({ success: false, error: 'No API key provided' });
     try {
         const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
