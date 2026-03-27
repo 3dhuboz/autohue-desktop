@@ -1717,8 +1717,11 @@ async function countZipImages(archivePath) {
             let count = 0;
             zipFile.readEntry();
             zipFile.on('entry', (entry) => {
-                const fileName = path.basename(entry.fileName);
-                if (/\.(jpg|jpeg|png|gif|bmp|webp)$/i.test(fileName) && !fileName.startsWith('.') && !fileName.startsWith('__')) {
+                const fullPath = entry.fileName;
+                const fileName = path.basename(fullPath);
+                // Skip __MACOSX, hidden files, and nested sorted folders
+                const isHidden = fullPath.includes('__MACOSX') || fullPath.includes('/.') || fileName.startsWith('.') || fileName.startsWith('__');
+                if (!isHidden && /\.(jpg|jpeg|png|gif|bmp|webp)$/i.test(fileName)) {
                     count++;
                 }
                 zipFile.readEntry();
@@ -2178,12 +2181,13 @@ app.post('/sort-local', async (req, res) => {
                     await extractRar(inputPath, extractDir, session);
                 }
 
-                // Collect all extracted files
-                const _dbg = path.join(STORAGE_ROOT, 'phase2-debug.log');
-                fs.appendFileSync(_dbg, `${new Date().toISOString()} extractDir: ${extractDir}\n`);
-                fs.appendFileSync(_dbg, `${new Date().toISOString()} extractDir exists: ${fs.existsSync(extractDir)}\n`);
+                // Collect all extracted files and SET FINAL TOTAL
                 const allFiles = collectImageFiles(extractDir);
-                fs.appendFileSync(_dbg, `${new Date().toISOString()} allFiles: ${allFiles.length}\n`);
+                // Override pre-scan total with ACTUAL extracted count (pre-scan includes __MACOSX duplicates)
+                session.total = allFiles.length;
+                session.total_images = allFiles.length;
+                extractedCount = allFiles.length;
+                console.log(`[${sessionId}] Final count: ${allFiles.length} images ready for classification`);
                 session.total = allFiles.length;
                 session.total_images = allFiles.length;
                 console.log(`[${sessionId}] Extraction complete: ${allFiles.length} images`);
@@ -2491,21 +2495,22 @@ app.post('/sort-local', async (req, res) => {
 app.post('/pause/:sessionId', (req, res) => {
     const session = sessions[req.params.sessionId];
     if (!session) return res.status(404).json({ error: 'Session not found' });
-    if (session.status === 'processing') {
+    if (session.status === 'processing' || session.status === 'extracting') {
+        session.previousStatus = session.status;
         session.status = 'paused';
         console.log(`[${req.params.sessionId}] Paused at ${session.processed}/${session.total}`);
         return res.json({ success: true, status: 'paused' });
     }
-    res.json({ success: false, status: session.status, message: 'Can only pause a processing session' });
+    res.json({ success: false, status: session.status, message: 'Can only pause a processing/extracting session' });
 });
 
 app.post('/resume/:sessionId', (req, res) => {
     const session = sessions[req.params.sessionId];
     if (!session) return res.status(404).json({ error: 'Session not found' });
     if (session.status === 'paused') {
-        session.status = 'processing';
+        session.status = session.previousStatus || 'processing';
         console.log(`[${req.params.sessionId}] Resumed at ${session.processed}/${session.total}`);
-        return res.json({ success: true, status: 'processing' });
+        return res.json({ success: true, status: session.status });
     }
     res.json({ success: false, status: session.status, message: 'Can only resume a paused session' });
 });
