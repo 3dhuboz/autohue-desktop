@@ -2213,6 +2213,9 @@ app.post('/sort-local', async (req, res) => {
                 session.currentFile = 'Starting classification...';
                 const pendingFiles = [...allFiles];
                 console.log(`[${sessionId}] Classification started — ${allFiles.length} images, ${OPENROUTER_KEYS.length} keys`);
+                // Debug log to file
+                const debugLog = path.join(STORAGE_ROOT, 'phase2-debug.log');
+                fs.appendFileSync(debugLog, `${new Date().toISOString()} PHASE2 START: ${allFiles.length} images, ${OPENROUTER_KEYS.length} keys, engine: ${getActiveEngine()}\n`);
 
                 async function waitIfPaused() {
                     while (session.status === 'paused') {
@@ -2414,6 +2417,7 @@ app.post('/sort-local', async (req, res) => {
                     console.log(`[${sessionId}] Cancelled.`);
                 } else {
                     console.error(`[${sessionId}] Archive processing error:`, err.message);
+                    fs.appendFileSync(path.join(STORAGE_ROOT, 'phase2-debug.log'), `${new Date().toISOString()} ERROR: ${err.message}\n${err.stack}\n`);
                     session.status = 'error';
                     session.error = err.message;
                 }
