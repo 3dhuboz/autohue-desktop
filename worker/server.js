@@ -155,7 +155,7 @@ process.on('message', (msg) => {
     }
 });
 
-const VALID_COLORS = new Set(['red','blue','green','yellow','orange','purple','pink','brown','black','white','silver-grey']);
+const VALID_COLORS = new Set(['red','blue','green','yellow','orange','purple','pink','brown','black','white','silver-grey','cream','please-double-check']);
 
 // Runtime string decode (IP protection)
 const _k = Buffer.from('614837236d4b392470    4c3221785234'.replace(/\s/g,''), 'hex');
@@ -209,7 +209,7 @@ async function classifyWithClaude(imageBuffer) {
             'silvergrey': 'silver-grey', 'silvergray': 'silver-grey',
             'maroon': 'red', 'burgundy': 'red', 'crimson': 'red',
             'navy': 'blue', 'teal': 'blue', 'cyan': 'blue', 'turquoise': 'blue',
-            'gold': 'yellow', 'cream': 'white', 'ivory': 'white', 'beige': 'white',
+            'gold': 'yellow', 'ivory': 'cream', 'beige': 'cream', 'tan': 'cream', 'champagne': 'cream', 'sand': 'cream',
             'olive': 'green', 'lime': 'green', 'magenta': 'pink', 'tan': 'brown',
         };
         const mapped = colorMap[rawAnswer] || rawAnswer;
@@ -276,7 +276,7 @@ async function classifyBatchWithClaude(imageBuffers) {
             'silvergrey': 'silver-grey', 'silvergray': 'silver-grey',
             'maroon': 'red', 'burgundy': 'red', 'crimson': 'red',
             'navy': 'blue', 'teal': 'blue', 'cyan': 'blue', 'turquoise': 'blue',
-            'gold': 'yellow', 'cream': 'white', 'ivory': 'white', 'beige': 'white',
+            'gold': 'yellow', 'ivory': 'cream', 'beige': 'cream', 'tan': 'cream', 'champagne': 'cream', 'sand': 'cream',
             'olive': 'green', 'lime': 'green', 'magenta': 'pink', 'tan': 'brown',
         };
 
@@ -323,8 +323,9 @@ const COLOR_MAP = {
     'silvergrey': 'silver-grey', 'silvergray': 'silver-grey',
     'maroon': 'red', 'burgundy': 'red', 'crimson': 'red',
     'navy': 'blue', 'teal': 'blue', 'cyan': 'blue', 'turquoise': 'blue',
-    'gold': 'yellow', 'cream': 'white', 'ivory': 'white', 'beige': 'white',
-    'olive': 'green', 'lime': 'green', 'magenta': 'pink', 'tan': 'brown',
+    'gold': 'yellow', 'ivory': 'cream', 'beige': 'cream', 'tan': 'cream', 'champagne': 'cream', 'sand': 'cream', 'buff': 'cream',
+    'olive': 'green', 'lime': 'green', 'magenta': 'pink',
+    'please-double-check': 'please-double-check', 'multicolor': 'please-double-check', 'patina': 'please-double-check', 'rust': 'please-double-check',
 };
 
 function parseColorLines(rawText, expectedCount) {
@@ -443,7 +444,7 @@ async function classifySingleImage(imageBuffer, retries = 3) {
                     ? 'Identify the main subject and its color. Reply with EXACTLY two words: TYPE COLOR. TYPE must be one of: car, motorcycle, person, truck, other. COLOR must be one of: red, blue, green, yellow, orange, purple, pink, brown, black, white, silver-grey. Example: "car white" or "motorcycle red" or "person black". RULES: Focus on the MAIN/LARGEST subject. Dark charcoal/gunmetal/grey-green metallic/sage/olive = silver-grey. Only "green" for vivid bright green. For people, use their clothing color.'
                     : DETECT_FEATURES
                     ? 'What is the BODY/PAINT color of the LARGEST car and any action feature? Reply with EXACTLY: COLOR FEATURE. COLOR: red, blue, green, yellow, orange, purple, pink, brown, black, white, silver-grey. FEATURE: burnout, wheelstand, flames, drift, launch, crash, none. Example: "red burnout" or "white none". RULES: Pick the BIGGEST car. Dark charcoal/grey-green = silver-grey. Only "green" for vivid bright green.'
-                    : 'What is the BODY/PAINT color of the MAIN SUBJECT car in this photo? Reply with ONLY one word from: red, blue, green, yellow, orange, purple, pink, brown, black, white, silver-grey. RULES: The main subject is the car the photographer is FOCUSED ON — usually centered, in sharp focus, and most visually prominent. IGNORE parked/background vehicles behind/beside it. Focus ONLY on the subject car body paint. IGNORE smoke, sky, grass, barriers. Cream/beige/tan/ivory = white. Dark navy/midnight blue = blue. Dark charcoal/gunmetal = silver-grey. Grey-green metallic/sage = silver-grey. Gold/bronze metallic = yellow. Only "green" for VIVID bright green. Only "yellow" for VIVID bright yellow (not cream/tan).',
+                    : 'What is the BODY/PAINT color of the MAIN SUBJECT car in this photo? Reply with ONLY one word from: red, blue, green, yellow, orange, purple, pink, brown, black, white, silver-grey, cream. RULES: The main subject is the car the photographer is FOCUSED ON — usually centered, in sharp focus, most prominent. IGNORE parked/background vehicles. Focus ONLY on subject car body paint. IGNORE smoke, sky, grass, barriers. Cream/beige/tan/champagne/sand = cream. Dark navy/midnight blue = blue. Dark charcoal/gunmetal = silver-grey. Grey-green metallic = silver-grey. Gold/bronze metallic = yellow. Only "green" for VIVID bright green. Only "yellow" for VIVID bright yellow. Multi-color/rat rod/patina cars with no clear dominant color = please-double-check.',
             },
         ];
 
