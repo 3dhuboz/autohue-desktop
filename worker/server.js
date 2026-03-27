@@ -2275,12 +2275,14 @@ app.post('/sort-local', async (req, res) => {
                 const preReadCache = new Map();
 
                 function grabBatch(maxSize) {
+                    // Hard cap: never exceed total
+                    if (processedCount >= extractedCount) return [];
                     // Enforce daily quota limit
                     if (session.maxImages && processedCount >= session.maxImages) {
                         console.log(`[${sessionId}] Daily quota reached (${session.maxImages} images). Stopping.`);
                         return [];
                     }
-                    const remaining = session.maxImages ? session.maxImages - processedCount : Infinity;
+                    const remaining = session.maxImages ? Math.min(session.maxImages - processedCount, extractedCount - processedCount) : extractedCount - processedCount;
                     const limit = Math.min(maxSize, remaining);
                     const batch = [];
                     while (batch.length < limit && pendingFiles.length > 0) {
@@ -2607,7 +2609,7 @@ app.get('/status/:sessionId', (req, res) => {
 
     res.json({
         status: session.status,
-        processed: session.processed,
+        processed: session.total > 0 ? Math.min(session.processed, session.total) : session.processed,
         total: session.total,
         extracted: session.extracted || session.processed,
         current_file: session.currentFile,
