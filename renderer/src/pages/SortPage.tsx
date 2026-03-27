@@ -417,9 +417,29 @@ export default function SortPage() {
           }
         }
 
-        // Detect completion: either worker says 'completed' OR processed >= total
+        // Detect completion: worker says 'completed', OR processed >= total, OR stalled at 95%+
+        const pct = data.total > 0 ? (data.processed / data.total) * 100 : 0;
         const isComplete = data.status === 'completed' || data.status === 'cancelled' ||
-          (data.processed > 0 && data.total > 0 && data.processed >= data.total);
+          (data.processed > 0 && data.total > 0 && data.processed >= data.total) ||
+          (pct >= 95 && data.status !== 'extracting' && data.status !== 'paused' && (() => {
+            // Stall detection: if at 95%+ and no progress for 15 seconds, force complete
+            const key = `autohue_stall_${sid}`;
+            const prev = parseInt(localStorage.getItem(key) || '0');
+            if (prev === data.processed) {
+              const stallStart = parseInt(localStorage.getItem(key + '_t') || String(Date.now()));
+              if (!localStorage.getItem(key + '_t')) localStorage.setItem(key + '_t', String(Date.now()));
+              if (Date.now() - stallStart > 15000) {
+                console.log(`[completion] Stall detected at ${data.processed}/${data.total} — forcing complete`);
+                localStorage.removeItem(key);
+                localStorage.removeItem(key + '_t');
+                return true;
+              }
+            } else {
+              localStorage.setItem(key, String(data.processed));
+              localStorage.removeItem(key + '_t');
+            }
+            return false;
+          })());
         if (isComplete) {
           if (pollRef.current) clearInterval(pollRef.current);
           localStorage.removeItem('autohue_active_session');
