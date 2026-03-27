@@ -89,6 +89,7 @@ export default function SettingsPage({ license, onRefresh }: Props) {
   const [showOrInput, setShowOrInput] = useState(false);
   const [orSaving, setOrSaving] = useState(false);
   const [sortByType, setSortByType] = useState(false);
+  const [detectFeatures, setDetectFeatures] = useState(false);
   const [orTesting, setOrTesting] = useState(false);
 
   useEffect(() => {
@@ -98,6 +99,7 @@ export default function SettingsPage({ license, onRefresh }: Props) {
     window.electronAPI.getClaudeKeyStatus().then(setClaudeStatus);
     window.electronAPI.getOpenRouterKeyStatus().then(setOrStatus);
     window.electronAPI.getSetting('sort_by_type').then(v => setSortByType(v === 'true'));
+    window.electronAPI.getSetting('detect_features').then(v => setDetectFeatures(v === 'true'));
   }, []);
 
   const handleSelectOutput = async () => {
@@ -433,6 +435,23 @@ export default function SettingsPage({ license, onRefresh }: Props) {
             className={`relative w-11 h-6 rounded-full transition-colors ${sortByType ? 'bg-racing-500' : 'bg-white/10'}`}
           >
             <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${sortByType ? 'translate-x-5' : ''}`} />
+          </button>
+        </div>
+        <div className="flex items-center justify-between">
+          <div>
+            <span className="text-xs text-white/70 font-heading font-bold block">Feature Shot Detection</span>
+            <span className="text-[10px] text-white/30">Tag burnouts, wheelstands, flames, drifts → copies to _highlights/ folder</span>
+          </div>
+          <button
+            onClick={async () => {
+              const current = await window.electronAPI.getSetting('detect_features');
+              const next = current === 'true' ? 'false' : 'true';
+              await window.electronAPI.setSetting('detect_features', next);
+              setDetectFeatures(next === 'true');
+            }}
+            className={`relative w-11 h-6 rounded-full transition-colors ${detectFeatures ? 'bg-racing-500' : 'bg-white/10'}`}
+          >
+            <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${detectFeatures ? 'translate-x-5' : ''}`} />
           </button>
         </div>
       </div>

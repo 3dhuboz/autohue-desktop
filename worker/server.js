@@ -114,6 +114,10 @@ let SORT_BY_TYPE = process.env.SORT_BY_TYPE === 'true' || false;
 const VALID_TYPES = new Set(['car', 'motorcycle', 'person', 'truck', 'other']);
 const TYPE_FOLDERS = { car: 'cars', motorcycle: 'bikes', person: 'people', truck: 'trucks', other: 'other' };
 
+// ─── Feature shot detection ───
+let DETECT_FEATURES = process.env.DETECT_FEATURES === 'true' || false;
+const VALID_FEATURES = new Set(['burnout', 'wheelstand', 'flames', 'drift', 'launch', 'crash', 'none']);
+
 function getActiveEngine() {
     if (OPENROUTER_KEYS.length > 0) return 'openrouter';
     if (CLAUDE_API_KEY) return 'claude';
@@ -144,6 +148,10 @@ process.on('message', (msg) => {
     if (msg.type === 'set-sort-by-type') {
         SORT_BY_TYPE = !!msg.enabled;
         console.log(`[config] Sort by vehicle type: ${SORT_BY_TYPE}`);
+    }
+    if (msg.type === 'set-detect-features') {
+        DETECT_FEATURES = !!msg.enabled;
+        console.log(`[config] Feature shot detection: ${DETECT_FEATURES}`);
     }
 });
 
@@ -429,8 +437,12 @@ async function classifySingleImage(imageBuffer, retries = 3) {
             },
             {
                 type: 'text',
-                text: SORT_BY_TYPE
-                    ? 'Identify the main subject and its color. Reply with EXACTLY two words: TYPE COLOR. TYPE must be one of: car, motorcycle, person, truck, other. COLOR must be one of: red, blue, green, yellow, orange, purple, pink, brown, black, white, silver-grey. Example: "car white" or "motorcycle red" or "person black". RULES: Focus on the MAIN subject. Dark charcoal/gunmetal/grey-green metallic/sage/olive = silver-grey. Only "green" for vivid bright green. For people, use their clothing color.'
+                text: SORT_BY_TYPE && DETECT_FEATURES
+                    ? 'Identify the main subject, its color, and any action feature. Reply with EXACTLY: TYPE COLOR FEATURE. TYPE: car, motorcycle, person, truck, other. COLOR: red, blue, green, yellow, orange, purple, pink, brown, black, white, silver-grey. FEATURE: burnout, wheelstand, flames, drift, launch, crash, none. Example: "car red burnout" or "motorcycle blue none" or "car white wheelstand". RULES: Pick the LARGEST subject. Dark charcoal/grey-green metallic = silver-grey. Only "green" for vivid bright green.'
+                    : SORT_BY_TYPE
+                    ? 'Identify the main subject and its color. Reply with EXACTLY two words: TYPE COLOR. TYPE must be one of: car, motorcycle, person, truck, other. COLOR must be one of: red, blue, green, yellow, orange, purple, pink, brown, black, white, silver-grey. Example: "car white" or "motorcycle red" or "person black". RULES: Focus on the MAIN/LARGEST subject. Dark charcoal/gunmetal/grey-green metallic/sage/olive = silver-grey. Only "green" for vivid bright green. For people, use their clothing color.'
+                    : DETECT_FEATURES
+                    ? 'What is the BODY/PAINT color of the LARGEST car and any action feature? Reply with EXACTLY: COLOR FEATURE. COLOR: red, blue, green, yellow, orange, purple, pink, brown, black, white, silver-grey. FEATURE: burnout, wheelstand, flames, drift, launch, crash, none. Example: "red burnout" or "white none". RULES: Pick the BIGGEST car. Dark charcoal/grey-green = silver-grey. Only "green" for vivid bright green.'
                     : 'What is the BODY/PAINT color of the LARGEST/CLOSEST car in this photo? Reply with ONLY one word from: red, blue, green, yellow, orange, purple, pink, brown, black, white, silver-grey. RULES: If multiple cars, pick the BIGGEST one in frame. Focus ONLY on car body paint. IGNORE smoke, asphalt, sky, grass, barriers, track. Dark charcoal/gunmetal/grey-green metallic/sage/olive = silver-grey. Gold/bronze metallic = yellow. Only "green" for vivid bright green.',
             },
         ];
@@ -466,27 +478,41 @@ async function classifySingleImage(imageBuffer, retries = 3) {
         const data = await res.json();
         const rawText = (data.choices?.[0]?.message?.content || '').trim().toLowerCase();
 
-        if (SORT_BY_TYPE) {
-            // Parse "type color" format
-            const parts = rawText.replace(/[^a-z- ]/g, '').split(/\s+/);
-            const type = parts[0] || 'other';
-            const colorRaw = parts[1] || parts[0] || '';
-            const mappedType = VALID_TYPES.has(type) ? type : 'car';
-            const mappedColor = COLOR_MAP[colorRaw] || colorRaw;
-            if (VALID_COLORS.has(mappedColor)) {
-                return { category: mappedColor, vehicleType: mappedType, confidence: 0.95, method: 'openrouter' };
+        // Parse response: could be "color", "type color", "color feature", or "type color feature"
+        const parts = rawText.replace(/[^a-z- ]/g, '').split(/\s+/).filter(Boolean);
+
+        let type = 'car', color = '', feature = 'none';
+
+        if (SORT_BY_TYPE && parts.length >= 2) {
+            // "type color [feature]"
+            type = VALID_TYPES.has(parts[0]) ? parts[0] : 'car';
+            color = parts[VALID_TYPES.has(parts[0]) ? 1 : 0];
+            if (parts.length >= 3 && DETECT_FEATURES) {
+                feature = VALID_FEATURES.has(parts[2]) ? parts[2] : 'none';
             }
-            // If only one word returned, treat as color with type=car
-            const singleColor = COLOR_MAP[type] || type;
-            if (VALID_COLORS.has(singleColor)) {
-                return { category: singleColor, vehicleType: 'car', confidence: 0.95, method: 'openrouter' };
-            }
+        } else if (DETECT_FEATURES && parts.length >= 2) {
+            // "color feature"
+            color = parts[0];
+            feature = VALID_FEATURES.has(parts[1]) ? parts[1] : 'none';
         } else {
-            const cleaned = rawText.replace(/[^a-z-]/g, '');
-            const mapped = COLOR_MAP[cleaned] || cleaned;
-            if (VALID_COLORS.has(mapped)) {
-                return { category: mapped, confidence: 0.95, method: 'openrouter' };
-            }
+            // "color" only
+            color = parts[0] || '';
+        }
+
+        const mappedColor = COLOR_MAP[color] || color;
+        if (VALID_COLORS.has(mappedColor)) {
+            const result = { category: mappedColor, confidence: 0.95, method: 'openrouter' };
+            if (SORT_BY_TYPE) result.vehicleType = type;
+            if (DETECT_FEATURES && feature !== 'none') result.feature = feature;
+            return result;
+        }
+
+        // Fallback: try first part as color
+        const fallback = COLOR_MAP[parts[0]] || parts[0] || '';
+        if (VALID_COLORS.has(fallback)) {
+            const result = { category: fallback, confidence: 0.95, method: 'openrouter' };
+            if (SORT_BY_TYPE) result.vehicleType = 'car';
+            return result;
         }
         console.warn(`[vision] Unrecognized: "${rawText}"`);
         return null;
@@ -2331,6 +2357,13 @@ app.post('/sort-local', async (req, res) => {
                                 colorFolder = path.join(outputDir, colorName);
                             }
                             fs.mkdirSync(colorFolder, { recursive: true });
+
+                            // Feature shots: also copy to _highlights/feature/ folder
+                            if (DETECT_FEATURES && colorInfo.feature && colorInfo.feature !== 'none') {
+                                const featureFolder = path.join(outputDir, '_highlights', colorInfo.feature);
+                                fs.mkdirSync(featureFolder, { recursive: true });
+                                fsPromises.copyFile(filePath, path.join(featureFolder, file)).catch(() => {});
+                            }
                             let destName = file;
                             let counter = 1;
                             while (fs.existsSync(path.join(colorFolder, destName))) {

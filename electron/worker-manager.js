@@ -110,6 +110,7 @@ class WorkerManager {
         ...(orKeys.length > 0 ? { OPENROUTER_KEY: orKeys.join(',') } : {}),
         VISION_MODEL: this.visionModel || 'google/gemini-2.0-flash-001',
         SORT_BY_TYPE: this.sortByType ? 'true' : 'false',
+        DETECT_FEATURES: this.detectFeatures ? 'true' : 'false',
       },
       silent: true, // capture stdout/stderr
     });

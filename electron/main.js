@@ -164,12 +164,15 @@ app.whenReady().then(async () => {
 
   const sortByTypeRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('sort_by_type');
   const sortByType = sortByTypeRow ? sortByTypeRow.value === 'true' : false;
+  const detectFeaturesRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('detect_features');
+  const detectFeatures = detectFeaturesRow ? detectFeaturesRow.value === 'true' : false;
 
   workerManager = new WorkerManager(storagePath);
   if (claudeKey) workerManager.setClaudeApiKey(claudeKey);
   workerManager.openRouterKeys = openRouterKeys;
   workerManager.visionModel = visionModel;
   workerManager.sortByType = sortByType;
+  workerManager.detectFeatures = detectFeatures;
   workerManager.start().catch(err => {
     console.error('Worker failed to start:', err.message);
   });
@@ -298,6 +301,9 @@ ipcMain.handle('settings:set', (_, key, value) => {
   // Forward relevant settings to worker
   if (key === 'sort_by_type' && workerManager?.process) {
     workerManager.process.send({ type: 'set-sort-by-type', enabled: value === 'true' });
+  }
+  if (key === 'detect_features' && workerManager?.process) {
+    workerManager.process.send({ type: 'set-detect-features', enabled: value === 'true' });
   }
   return true;
 });
