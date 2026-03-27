@@ -2142,22 +2142,23 @@ app.post('/sort-local', async (req, res) => {
         const extractDir = path.join(sessionUploadDir, '_extracted');
         fs.mkdirSync(extractDir, { recursive: true });
 
-        // ── PIPELINE: Extract + Classify simultaneously ──
-        // Start processing images AS they're extracted (don't wait for full extraction)
-        // This dramatically reduces total time for large archives
+        // ── TWO-PHASE: Extract ALL first, THEN classify in bulk ──
+        // Phase 1: Full extraction (shows progress to user)
+        // Phase 2: Bulk classification with all API keys at max throughput
         (async () => {
             try {
                 const outputDir = path.join(OUTPUT_DIR, sessionId);
                 fs.mkdirSync(outputDir, { recursive: true });
 
-                const pendingFiles = []; // Queue of extracted files ready to classify
-                let extractionDone = false;
                 let extractedCount = 0;
                 let processedCount = 0;
                 session.results = [];
                 session.colorCounts = {};
 
-                // Pre-scan: count total images in archive FAST (no extraction)
+                // ── PHASE 1: Extract all images ──
+                session.status = 'extracting';
+
+                // Pre-scan: count total images in archive FAST
                 if (/\.zip$/i.test(inputPath)) {
                     try {
                         session.currentFile = 'Scanning archive...';
@@ -2170,60 +2171,48 @@ app.post('/sort-local', async (req, res) => {
                     }
                 }
 
-                // Start extraction in background — pushes files to queue as they appear
-                const extractionPromise = (async () => {
-                    if (/\.zip$/i.test(inputPath)) {
-                        await new Promise((resolve, reject) => {
-                            fs.createReadStream(inputPath)
-                                .pipe(unzipper.Parse())
-                                .on('entry', (entry) => {
-                                    const fileName = path.basename(entry.path);
-                                    if (/\.(jpg|jpeg|png|gif|bmp|webp)$/i.test(fileName) && !fileName.startsWith('.') && !fileName.startsWith('__')) {
-                                        extractedCount++;
-                                        let destName = fileName;
-                                        let c = 1;
-                                        while (fs.existsSync(path.join(extractDir, destName))) {
-                                            const ext = path.extname(fileName);
-                                            destName = `${path.basename(fileName, ext)}_${c}${ext}`;
-                                            c++;
-                                        }
-                                        const destPath = path.join(extractDir, destName);
-                                        const ws = fs.createWriteStream(destPath);
-                                        entry.pipe(ws);
-                                        ws.on('finish', () => {
-                                            pendingFiles.push(destPath);
-                                            // Only update total if pre-scan didn't set it (or if we found more than expected)
-                                            if (!session.total || extractedCount > session.total) {
-                                                session.total = extractedCount;
-                                                session.total_images = extractedCount;
-                                            }
-                                            session.extracted = extractedCount;
-                                            session.currentFile = `Extracting: ${destName} (${extractedCount}/${session.total})`;
-                                        });
-                                    } else {
-                                        entry.autodrain();
+                // Extract everything
+                if (/\.zip$/i.test(inputPath)) {
+                    await new Promise((resolve, reject) => {
+                        fs.createReadStream(inputPath)
+                            .pipe(unzipper.Parse())
+                            .on('entry', (entry) => {
+                                const fileName = path.basename(entry.path);
+                                if (/\.(jpg|jpeg|png|gif|bmp|webp)$/i.test(fileName) && !fileName.startsWith('.') && !fileName.startsWith('__')) {
+                                    extractedCount++;
+                                    let destName = fileName;
+                                    let c = 1;
+                                    while (fs.existsSync(path.join(extractDir, destName))) {
+                                        const ext = path.extname(fileName);
+                                        destName = `${path.basename(fileName, ext)}_${c}${ext}`;
+                                        c++;
                                     }
-                                })
-                                .on('close', resolve)
-                                .on('error', reject);
-                        });
-                    } else if (/\.rar$/i.test(inputPath)) {
-                        await extractRar(inputPath, extractDir, session);
-                        // For RAR, add all extracted files to queue at once
-                        const rarFiles = collectImageFiles(extractDir);
-                        extractedCount = rarFiles.length;
-                        session.total = extractedCount;
-                        session.total_images = extractedCount;
-                        pendingFiles.push(...rarFiles);
-                    }
-                    extractionDone = true;
-                    console.log(`[${sessionId}] Extraction complete: ${extractedCount} images`);
-                })();
+                                    const destPath = path.join(extractDir, destName);
+                                    entry.pipe(fs.createWriteStream(destPath));
+                                    session.extracted = extractedCount;
+                                    session.currentFile = `Extracting: ${destName} (${extractedCount}/${session.total || '?'})`;
+                                } else {
+                                    entry.autodrain();
+                                }
+                            })
+                            .on('close', resolve)
+                            .on('error', reject);
+                    });
+                } else if (/\.rar$/i.test(inputPath)) {
+                    await extractRar(inputPath, extractDir, session);
+                }
 
-                // Classification loop — processes files as they appear in the queue
-                // Starts as soon as first image is extracted
+                // Collect all extracted files
+                const allFiles = collectImageFiles(extractDir);
+                session.total = allFiles.length;
+                session.total_images = allFiles.length;
+                console.log(`[${sessionId}] Extraction complete: ${allFiles.length} images`);
+
+                // ── PHASE 2: Classify all images at max speed ──
                 session.status = 'processing';
-                console.log(`[${sessionId}] Pipeline started — classifying as images are extracted`);
+                session.currentFile = 'Starting classification...';
+                const pendingFiles = [...allFiles];
+                console.log(`[${sessionId}] Classification started — ${allFiles.length} images, ${OPENROUTER_KEYS.length} keys`);
 
                 async function waitIfPaused() {
                     while (session.status === 'paused') {
@@ -2373,11 +2362,11 @@ app.post('/sort-local', async (req, res) => {
                 const STALL_TIMEOUT_MS = 30000; // 30s with no progress = stalled
 
                 const workers = Array.from({ length: BATCH_CONCURRENCY }, async (_, workerIdx) => {
-                    while (!extractionDone || pendingFiles.length > 0) {
+                    while (pendingFiles.length > 0) {
                         if (cancelled || session.status === 'cancelled') { cancelled = true; return; }
 
-                        // Stall detection: if extraction is done and no progress for 30s, break
-                        if (extractionDone && pendingFiles.length === 0) {
+                        // Stall detection
+                        if (pendingFiles.length === 0) {
                             if (processedCount > lastProgressCount) {
                                 lastProgressCount = processedCount;
                                 lastProgressAt = Date.now();
@@ -2398,9 +2387,8 @@ app.post('/sort-local', async (req, res) => {
                         const batch = grabBatch(activeBatchSize);
                         if (batch.length === 0) {
                             // Quota reached or no files — break if extraction done
-                            if (extractionDone) return;
-                            await new Promise(r => setTimeout(r, 200));
-                            continue;
+                            return; // All files processed
+
                         }
 
                         lastProgressAt = Date.now();
@@ -2415,9 +2403,6 @@ app.post('/sort-local', async (req, res) => {
                 });
 
                 await Promise.all(workers);
-
-                // Wait for extraction to fully complete (should already be done)
-                await extractionPromise;
 
                 session.status = 'completed';
                 session.currentFile = '';
