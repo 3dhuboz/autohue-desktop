@@ -716,7 +716,9 @@ export default function SortPage() {
               </p>
               {(() => {
                 const engine = health?.visionEngine || 'local';
-                const isApiEngine = engine === 'openrouter' || engine === 'claude';
+                // Also check results for method — fallback if health doesn't report engine
+                const lastMethod = stats.results.length > 0 ? ((stats.results[stats.results.length - 1] as any)?.method || '') : '';
+                const isApiEngine = engine === 'openrouter' || engine === 'claude' || lastMethod.includes('openrouter');
                 const engineLabel = isApiEngine ? 'AI Vision Pro' : 'Local AI';
                 return (
                   <span className={`inline-flex items-center gap-1.5 mt-2 px-2.5 py-1 rounded-full text-[10px] font-bold ${
