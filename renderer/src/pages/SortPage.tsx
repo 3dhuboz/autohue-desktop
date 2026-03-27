@@ -136,14 +136,47 @@ export default function SortPage() {
             startPolling(sid);
           } else if (data.status === 'completed') {
             setSessionId(sid);
-            setStats(prev => ({ ...prev, total: data.total, processed: data.processed, startTime: startTime || Date.now() }));
+            const elapsed = Math.max(1, Math.round((Date.now() - (startTime || Date.now())) / 1000));
+            const processed = data.processed || 0;
+            const ips = elapsed > 0 ? processed / elapsed : 0;
+            setStats(prev => ({
+              ...prev, total: data.total, processed,
+              startTime: startTime || Date.now(),
+              colorCounts: data.color_counts || {},
+              imagesPerSecond: ips,
+              timeSavedSeconds: processed * 15,
+              extracted: data.extracted || processed,
+            }));
             setPhase('complete');
             localStorage.removeItem('autohue_active_session');
+            // Record usage if not already done
+            recordUsage(sid, processed, data.color_counts || {}).then(() => refreshLicense()).catch(() => {});
           } else {
             localStorage.removeItem('autohue_active_session');
           }
         })
-        .catch(() => localStorage.removeItem('autohue_active_session'));
+        .catch(() => {
+          // Session gone from worker memory — check if output exists (completed while away)
+          fetch(`${workerUrl}/folders/${sid}`)
+            .then(r => r.ok ? r.json() : null)
+            .then(folders => {
+              if (folders && Object.keys(folders).length > 0) {
+                // Output exists — show completion screen
+                setSessionId(sid);
+                let total = 0;
+                const colorCounts: Record<string, number> = {};
+                Object.entries(folders).forEach(([color, files]: [string, unknown]) => {
+                  const count = Array.isArray(files) ? files.length : 0;
+                  total += count;
+                  if (count > 0) colorCounts[color] = count;
+                });
+                setStats(prev => ({ ...prev, processed: total, total, colorCounts, timeSavedSeconds: total * 15 }));
+                setPhase('complete');
+              }
+              localStorage.removeItem('autohue_active_session');
+            })
+            .catch(() => localStorage.removeItem('autohue_active_session'));
+        });
     }
 
     return () => {
@@ -382,7 +415,10 @@ export default function SortPage() {
           }
         }
 
-        if (data.status === 'completed' || data.status === 'cancelled') {
+        // Detect completion: either worker says 'completed' OR processed >= total
+        const isComplete = data.status === 'completed' || data.status === 'cancelled' ||
+          (data.processed > 0 && data.total > 0 && data.processed >= data.total);
+        if (isComplete) {
           if (pollRef.current) clearInterval(pollRef.current);
           localStorage.removeItem('autohue_active_session');
           // Capture final stats BEFORE changing phase
