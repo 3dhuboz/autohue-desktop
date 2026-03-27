@@ -1667,21 +1667,24 @@ async function generateThumb(imagePath, sessionId, filename) {
 
 // ─── Count images in ZIP without extracting (fast pre-scan) ───
 async function countZipImages(archivePath) {
-    let count = 0;
-    await new Promise((resolve, reject) => {
-        fs.createReadStream(archivePath)
-            .pipe(unzipper.Parse())
-            .on('entry', (entry) => {
-                const fileName = path.basename(entry.path);
+    // Use yauzl to read the central directory (instant, even for huge ZIPs)
+    const yauzl = require('yauzl');
+    return new Promise((resolve, reject) => {
+        yauzl.open(archivePath, { lazyEntries: true }, (err, zipFile) => {
+            if (err) return reject(err);
+            let count = 0;
+            zipFile.readEntry();
+            zipFile.on('entry', (entry) => {
+                const fileName = path.basename(entry.fileName);
                 if (/\.(jpg|jpeg|png|gif|bmp|webp)$/i.test(fileName) && !fileName.startsWith('.') && !fileName.startsWith('__')) {
                     count++;
                 }
-                entry.autodrain();
-            })
-            .on('close', resolve)
-            .on('error', reject);
+                zipFile.readEntry();
+            });
+            zipFile.on('end', () => resolve(count));
+            zipFile.on('error', reject);
+        });
     });
-    return count;
 }
 
 // ─── Extract images from ZIP archive ───

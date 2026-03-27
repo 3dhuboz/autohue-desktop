@@ -23,7 +23,8 @@ execSync([
   '--platform=node',
   '--target=node20',
   '--outfile=worker/dist/server.js',
-  '--minify',                     // Protect IP: minify variable names + whitespace
+  '--minify-whitespace',           // Remove whitespace
+  '--minify-syntax',               // Simplify syntax (but keep all functions reachable)
   '--legal-comments=none',        // Strip all comments
   '--external:onnxruntime-node',  // native .node binding
   '--external:node-unrar-js',     // native .node binding (wasm)

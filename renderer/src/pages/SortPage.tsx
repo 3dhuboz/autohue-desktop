@@ -772,8 +772,8 @@ export default function SortPage() {
               </div>
             </div>
 
-            {/* ── Extraction Phase UI ── */}
-            {extractionPhase.active && stats.processed === 0 && (
+            {/* ── Extraction Phase UI — show when no images classified yet ── */}
+            {stats.processed === 0 && phase === 'sorting' && (
               <div className="glass-card rounded-3xl p-8 text-center animate-fade-up">
                 {/* Big animated archive icon */}
                 <div className="relative inline-flex items-center justify-center mb-6">
@@ -838,8 +838,8 @@ export default function SortPage() {
               </div>
             )}
 
-            {/* Gauges — only show during classification (not extraction) */}
-            <div className={`glass-card rounded-3xl p-6 ${extractionPhase.active && stats.processed === 0 ? 'hidden' : ''}`}>
+            {/* Gauges — hide when nothing classified yet (extraction/prep phase) */}
+            <div className={`glass-card rounded-3xl p-6 ${stats.processed === 0 && phase === 'sorting' ? 'hidden' : ''}`}>
               <div className="grid grid-cols-3 lg:grid-cols-6 gap-4 items-start">
                 <TachoGauge value={speedPct} max={10} label="SPEED" unit="img/sec" displayValue={stats.imagesPerSecond.toFixed(1)} size={150} variant="red" redZoneStart={80} subtitle={stats.imagesPerSecond > 0 ? `~${(1/stats.imagesPerSecond).toFixed(1)}s each` : ''} />
                 <TachoGauge value={progressPct} max={100} label="PROGRESS" unit={`${stats.processed}/${stats.total}`} displayValue={`${progressPct}%`} size={150} variant="amber" redZoneStart={90} />
@@ -854,7 +854,8 @@ export default function SortPage() {
             <div className="glass-card rounded-2xl p-5 space-y-3">
               <div className="flex items-center justify-between text-sm">
                 <span className="text-white/50 flex items-center gap-2">
-                  <SpinnerIcon size={14} className="text-racing-500" />
+                  {!paused && <SpinnerIcon size={14} className="text-racing-500" />}
+                  {paused && <span className="w-3.5 h-3.5 rounded-full bg-amber-500/50" />}
                   {stats.total === 0 && stats.processed === 0 && stats.currentFile?.toLowerCase().includes('extract')
                     ? <span className="text-amber-400">{stats.currentFile}</span>
                     : stats.total === 0 && stats.processed === 0
