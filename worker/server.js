@@ -2173,13 +2173,15 @@ app.post('/sort-local', async (req, res) => {
 
                 // Extract everything
                 if (/\.zip$/i.test(inputPath)) {
+                    let pendingWrites = 0;
                     await new Promise((resolve, reject) => {
-                        fs.createReadStream(inputPath)
+                        const stream = fs.createReadStream(inputPath)
                             .pipe(unzipper.Parse())
                             .on('entry', (entry) => {
                                 const fileName = path.basename(entry.path);
                                 if (/\.(jpg|jpeg|png|gif|bmp|webp)$/i.test(fileName) && !fileName.startsWith('.') && !fileName.startsWith('__')) {
                                     extractedCount++;
+                                    pendingWrites++;
                                     let destName = fileName;
                                     let c = 1;
                                     while (fs.existsSync(path.join(extractDir, destName))) {
@@ -2188,22 +2190,38 @@ app.post('/sort-local', async (req, res) => {
                                         c++;
                                     }
                                     const destPath = path.join(extractDir, destName);
-                                    entry.pipe(fs.createWriteStream(destPath));
-                                    session.extracted = extractedCount;
+                                    const ws = fs.createWriteStream(destPath);
+                                    entry.pipe(ws);
+                                    ws.on('finish', () => {
+                                        pendingWrites--;
+                                        session.extracted = extractedCount - pendingWrites;
+                                    });
                                     session.currentFile = `Extracting: ${destName} (${extractedCount}/${session.total || '?'})`;
                                 } else {
                                     entry.autodrain();
                                 }
                             })
-                            .on('close', resolve)
+                            .on('close', () => {
+                                // Wait for all writes to finish
+                                const waitForWrites = () => {
+                                    if (pendingWrites <= 0) resolve();
+                                    else setTimeout(waitForWrites, 100);
+                                };
+                                waitForWrites();
+                            })
                             .on('error', reject);
                     });
+                    fs.appendFileSync(path.join(STORAGE_ROOT, 'phase2-debug.log'), `${new Date().toISOString()} EXTRACTION DONE: ${extractedCount} extracted\n`);
                 } else if (/\.rar$/i.test(inputPath)) {
                     await extractRar(inputPath, extractDir, session);
                 }
 
                 // Collect all extracted files
+                const _dbg = path.join(STORAGE_ROOT, 'phase2-debug.log');
+                fs.appendFileSync(_dbg, `${new Date().toISOString()} extractDir: ${extractDir}\n`);
+                fs.appendFileSync(_dbg, `${new Date().toISOString()} extractDir exists: ${fs.existsSync(extractDir)}\n`);
                 const allFiles = collectImageFiles(extractDir);
+                fs.appendFileSync(_dbg, `${new Date().toISOString()} allFiles: ${allFiles.length}\n`);
                 session.total = allFiles.length;
                 session.total_images = allFiles.length;
                 console.log(`[${sessionId}] Extraction complete: ${allFiles.length} images`);
