@@ -132,10 +132,19 @@ app.whenReady().then(async () => {
   // 3. Get API keys — OpenRouter + Claude
   const customKeyRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('claude_api_key');
   const claudeKey = (customKeyRow ? customKeyRow.value : null) || licenseManager.getClaudeApiKey();
-  const orKeyRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('openrouter_api_key');
-  const openRouterKey = orKeyRow ? orKeyRow.value : null;
+  // Multi-key support: read from openrouter_api_keys (JSON array) or fall back to single key
+  let openRouterKeys = [];
+  const orKeysRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('openrouter_api_keys');
+  if (orKeysRow) {
+    try { openRouterKeys = JSON.parse(orKeysRow.value); } catch {}
+  }
+  if (openRouterKeys.length === 0) {
+    const orKeyRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('openrouter_api_key');
+    if (orKeyRow && orKeyRow.value) openRouterKeys = [orKeyRow.value];
+  }
   const modelRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('vision_model');
   const visionModel = modelRow ? modelRow.value : 'google/gemini-2.0-flash-001';
+  if (openRouterKeys.length > 0) console.log(`[main] OpenRouter: ${openRouterKeys.length} keys loaded`);
 
   const fs = require('fs');
 
@@ -144,13 +153,13 @@ app.whenReady().then(async () => {
   fs.mkdirSync(storagePath, { recursive: true });
   // Write keyfiles so worker can read them directly
   const claudeKeyPath = path.join(storagePath, '.claude-key');
-  const orKeyPath = path.join(storagePath, '.openrouter-key');
+  const orKeysPath = path.join(storagePath, '.openrouter-keys');
   if (claudeKey) { fs.writeFileSync(claudeKeyPath, claudeKey, 'utf8'); } else { try { fs.unlinkSync(claudeKeyPath); } catch {} }
-  if (openRouterKey) { fs.writeFileSync(orKeyPath, openRouterKey, 'utf8'); } else { try { fs.unlinkSync(orKeyPath); } catch {} }
+  if (openRouterKeys.length > 0) { fs.writeFileSync(orKeysPath, openRouterKeys.join('\n'), 'utf8'); }
 
   workerManager = new WorkerManager(storagePath);
   if (claudeKey) workerManager.setClaudeApiKey(claudeKey);
-  if (openRouterKey) workerManager.setOpenRouterKey(openRouterKey);
+  workerManager.openRouterKeys = openRouterKeys;
   workerManager.visionModel = visionModel;
   workerManager.start().catch(err => {
     console.error('Worker failed to start:', err.message);

@@ -9,7 +9,7 @@ class WorkerManager {
     this.storagePath = storagePath;
     this.restarting = false;
     this.claudeApiKey = null;
-    this.openRouterKey = null;
+    this.openRouterKeys = [];
     this.visionModel = 'google/gemini-2.0-flash-001';
 
     // Ensure storage directories exist
@@ -25,12 +25,11 @@ class WorkerManager {
     }
   }
 
-  /** Set the OpenRouter API key. */
+  /** Set the OpenRouter API key (single — appends to list). */
   setOpenRouterKey(key) {
-    this.openRouterKey = key;
+    if (key && !this.openRouterKeys.includes(key)) this.openRouterKeys.push(key);
     if (this.process && key) {
-      this.process.send({ type: 'set-openrouter-key', key });
-      console.log('[worker] Sent OpenRouter key to running worker');
+      this.process.send({ type: 'set-openrouter-keys', keys: this.openRouterKeys });
     }
   }
 
@@ -101,14 +100,14 @@ class WorkerManager {
       console.log(`[worker] Passing CLAUDE_API_KEY to worker env: ${claudeKey.slice(0, 12)}...`);
     }
 
-    const orKey = this.openRouterKey;
+    const orKeys = this.openRouterKeys;
     this.process = fork(serverPath, [], {
       env: {
         ...process.env,
         PORT: String(this.port),
         STORAGE_ROOT: this.storagePath,
         ...(claudeKey ? { CLAUDE_API_KEY: claudeKey } : {}),
-        ...(orKey ? { OPENROUTER_KEY: orKey } : {}),
+        ...(orKeys.length > 0 ? { OPENROUTER_KEY: orKeys.join(',') } : {}),
         VISION_MODEL: this.visionModel || 'google/gemini-2.0-flash-001',
       },
       silent: true, // capture stdout/stderr

@@ -38,21 +38,69 @@ app.use(express.json());
 // Fallback: multi-region sampling + HSV env filtering if SegFormer unavailable
 // ═══════════════════════════════════════════════════════════════════════════
 
-// ─── Vision API (OpenRouter — single key for all models) ───
-let OPENROUTER_KEY = process.env.OPENROUTER_KEY || '';
+// ─── Vision API (OpenRouter — multi-key rotation) ───
+let OPENROUTER_KEYS = [];
 let VISION_MODEL = process.env.VISION_MODEL || 'google/gemini-2.0-flash-001';
+let keyIndex = 0;
+const keyBackoff = new Map(); // key → timestamp when it can be used again
 
-// Fallback: read from keyfile
-if (!OPENROUTER_KEY) {
+// Load keys from env (comma-separated) or keyfile
+if (process.env.OPENROUTER_KEY) {
+    OPENROUTER_KEYS = process.env.OPENROUTER_KEY.split(',').map(k => k.trim()).filter(Boolean);
+}
+if (OPENROUTER_KEYS.length === 0) {
+    try {
+        const keyFile = path.join(STORAGE_ROOT, '.openrouter-keys');
+        if (fs.existsSync(keyFile)) {
+            OPENROUTER_KEYS = fs.readFileSync(keyFile, 'utf8').trim().split('\n').map(k => k.trim()).filter(Boolean);
+        }
+    } catch {}
+}
+// Fallback: single key file
+if (OPENROUTER_KEYS.length === 0) {
     try {
         const keyFile = path.join(STORAGE_ROOT, '.openrouter-key');
         if (fs.existsSync(keyFile)) {
-            OPENROUTER_KEY = fs.readFileSync(keyFile, 'utf8').trim();
+            const k = fs.readFileSync(keyFile, 'utf8').trim();
+            if (k) OPENROUTER_KEYS = [k];
         }
-    } catch (err) { /* ignore */ }
+    } catch {}
 }
 
-// Legacy: also check claude/gemini keyfiles for backward compat
+console.log(`[config] OpenRouter keys: ${OPENROUTER_KEYS.length}`);
+
+// Round-robin key selection with rate-limit skip
+function getNextKey() {
+    if (OPENROUTER_KEYS.length === 0) return null;
+    const now = Date.now();
+    // Try each key, skip any in backoff
+    for (let i = 0; i < OPENROUTER_KEYS.length; i++) {
+        const idx = (keyIndex + i) % OPENROUTER_KEYS.length;
+        const key = OPENROUTER_KEYS[idx];
+        const backoffUntil = keyBackoff.get(key) || 0;
+        if (now >= backoffUntil) {
+            keyIndex = (idx + 1) % OPENROUTER_KEYS.length;
+            return key;
+        }
+    }
+    // All keys in backoff — return the one with shortest wait
+    let bestKey = OPENROUTER_KEYS[0];
+    let bestTime = Infinity;
+    for (const key of OPENROUTER_KEYS) {
+        const t = keyBackoff.get(key) || 0;
+        if (t < bestTime) { bestTime = t; bestKey = key; }
+    }
+    return bestKey;
+}
+
+function markKeyRateLimited(key) {
+    // Back off this key for 10 seconds
+    keyBackoff.set(key, Date.now() + 10000);
+    const available = OPENROUTER_KEYS.filter(k => (keyBackoff.get(k) || 0) <= Date.now()).length;
+    console.log(`[openrouter] Key ...${key.slice(-6)} rate-limited, ${available}/${OPENROUTER_KEYS.length} keys available`);
+}
+
+// Legacy: also check claude keyfile for backward compat
 let CLAUDE_API_KEY = process.env.CLAUDE_API_KEY || '';
 if (!CLAUDE_API_KEY) {
     try {
@@ -62,7 +110,7 @@ if (!CLAUDE_API_KEY) {
 }
 
 function getActiveEngine() {
-    if (OPENROUTER_KEY) return 'openrouter';
+    if (OPENROUTER_KEYS.length > 0) return 'openrouter';
     if (CLAUDE_API_KEY) return 'claude';
     return 'local';
 }
@@ -72,9 +120,14 @@ console.log(`[config] Engine: ${getActiveEngine()}`);
 // Listen for runtime updates from main process
 process.on('message', (msg) => {
     if (!msg) return;
+    if (msg.type === 'set-openrouter-keys' && msg.keys) {
+        OPENROUTER_KEYS = Array.isArray(msg.keys) ? msg.keys : [msg.keys];
+        console.log(`[config] OpenRouter keys updated: ${OPENROUTER_KEYS.length}`);
+    }
     if (msg.type === 'set-openrouter-key' && msg.key) {
-        OPENROUTER_KEY = msg.key;
-        console.log('[config] OpenRouter key updated');
+        // Legacy single-key support
+        if (!OPENROUTER_KEYS.includes(msg.key)) OPENROUTER_KEYS.push(msg.key);
+        console.log(`[config] OpenRouter keys: ${OPENROUTER_KEYS.length}`);
     }
     if (msg.type === 'set-vision-model' && msg.model) {
         VISION_MODEL = msg.model;
@@ -276,7 +329,7 @@ function parseColorLines(rawText, expectedCount) {
 const OPENROUTER_BATCH_SIZE = 10; // 10 images per batch cycle (mix of batch calls + parallel)
 
 async function classifyBatchWithOpenRouter(imageBuffers) {
-    if (!OPENROUTER_KEY || imageBuffers.length === 0) return null;
+    if (OPENROUTER_KEYS.length === 0 || imageBuffers.length === 0) return null;
 
     // Split into mini-batches of 3 images each, run 3 mini-batches in parallel
     // 3 images per API call = model can easily track order
@@ -298,7 +351,7 @@ async function classifyBatchWithOpenRouter(imageBuffers) {
 }
 
 async function classifyMiniBatch(imageBuffers, retries = 3) {
-    if (!OPENROUTER_KEY || imageBuffers.length === 0) return imageBuffers.map(() => null);
+    if (OPENROUTER_KEYS.length === 0 || imageBuffers.length === 0) return imageBuffers.map(() => null);
 
     // Single image? Use simple prompt
     if (imageBuffers.length === 1) {
@@ -307,6 +360,8 @@ async function classifyMiniBatch(imageBuffers, retries = 3) {
     }
 
     for (let attempt = 0; attempt < retries; attempt++) {
+    const apiKey = getNextKey();
+    if (!apiKey) return imageBuffers.map(() => null);
     try {
         const content = [];
         for (let i = 0; i < imageBuffers.length; i++) {
@@ -325,7 +380,7 @@ async function classifyMiniBatch(imageBuffers, retries = 3) {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${OPENROUTER_KEY}`,
+                'Authorization': `Bearer ${apiKey}`,
                 'HTTP-Referer': 'https://autohue.app',
                 'X-Title': 'AutoHue',
             },
@@ -339,11 +394,10 @@ async function classifyMiniBatch(imageBuffers, retries = 3) {
         });
 
         if (!res.ok) {
-            if (res.status === 429 && attempt < retries - 1) {
-                await new Promise(r => setTimeout(r, (attempt + 1) * 3000));
-                continue;
+            if (res.status === 429) {
+                markKeyRateLimited(apiKey);
+                if (attempt < retries - 1) continue; // try next key immediately
             }
-            // Batch failed — fall back to individual classification
             console.warn(`[vision] Mini-batch failed (${res.status}), trying individually`);
             return Promise.all(imageBuffers.map(buf => classifySingleImage(buf).catch(() => null)));
         }
@@ -354,11 +408,7 @@ async function classifyMiniBatch(imageBuffers, retries = 3) {
         results.forEach(r => { if (r) r.method = 'openrouter'; });
         return results;
     } catch (err) {
-        if (attempt < retries - 1) {
-            await new Promise(r => setTimeout(r, (attempt + 1) * 2000));
-            continue;
-        }
-        // Final fallback: classify individually
+        if (attempt < retries - 1) continue;
         return Promise.all(imageBuffers.map(buf => classifySingleImage(buf).catch(() => null)));
     }
     }
@@ -366,8 +416,10 @@ async function classifyMiniBatch(imageBuffers, retries = 3) {
 }
 
 async function classifySingleImage(imageBuffer, retries = 3) {
-    if (!OPENROUTER_KEY) return null;
+    if (OPENROUTER_KEYS.length === 0) return null;
     for (let attempt = 0; attempt < retries; attempt++) {
+    const apiKey = getNextKey();
+    if (!apiKey) return null;
     try {
         const content = [
             {
@@ -384,7 +436,7 @@ async function classifySingleImage(imageBuffer, retries = 3) {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${OPENROUTER_KEY}`,
+                'Authorization': `Bearer ${apiKey}`,
                 'HTTP-Referer': 'https://autohue.app',
                 'X-Title': 'AutoHue',
             },
@@ -399,12 +451,10 @@ async function classifySingleImage(imageBuffer, retries = 3) {
 
         if (!res.ok) {
             const errText = await res.text().catch(() => '');
-            // Rate limited — wait and retry
-            if (res.status === 429 && attempt < retries - 1) {
-                const wait = (attempt + 1) * 3000; // 3s, 6s, 9s
-                console.warn(`[vision] Rate limited (429). Waiting ${wait/1000}s before retry ${attempt + 2}/${retries}`);
-                await new Promise(r => setTimeout(r, wait));
-                continue;
+            // Rate limited — mark key and try next immediately
+            if (res.status === 429) {
+                markKeyRateLimited(apiKey);
+                if (attempt < retries - 1) continue; // try next key
             }
             console.error(`[vision] API ${res.status}: ${errText.slice(0, 100)}`);
             return null;
