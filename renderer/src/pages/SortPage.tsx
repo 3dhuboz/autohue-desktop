@@ -895,7 +895,7 @@ export default function SortPage() {
                   color: r.color || 'unknown',
                   thumb: r.thumb ? `${workerUrl}${r.thumb}` : null,
                 }))}
-                isProcessing={phase === 'sorting'}
+                isProcessing={phase === 'sorting' && !paused}
                 totalProcessed={stats.processed}
                 totalImages={stats.total}
               />

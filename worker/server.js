@@ -2065,6 +2065,15 @@ app.post('/sort-local', async (req, res) => {
     const sessionUploadDir = path.join(UPLOAD_DIR, sessionId);
     fs.mkdirSync(sessionUploadDir, { recursive: true });
 
+    // Clean up old upload directories to prevent disk waste
+    try {
+        const allUploads = fs.readdirSync(UPLOAD_DIR).filter(d => d !== sessionId);
+        for (const old of allUploads) {
+            try { fs.rmSync(path.join(UPLOAD_DIR, old), { recursive: true, force: true }); } catch {}
+        }
+        if (allUploads.length > 0) console.log(`[cleanup] Removed ${allUploads.length} old upload dirs`);
+    } catch {}
+
     // If inputPath is an archive file (ZIP/RAR), extract directly from original location
     // No copying or symlinking — the worker reads the archive in-place
     const isArchiveFile = stat.isFile() && /\.(zip|rar)$/i.test(inputPath);

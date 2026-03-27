@@ -159,6 +159,7 @@ export default function SortAnimation({ results, isProcessing, totalProcessed, t
                 inset: `${-6 * (i + 1)}px`,
                 border: `1px solid ${phase === 'analyze' ? `${swatch}25` : 'rgba(220,38,38,0.06)'}`,
                 animation: `ah-pulse ${isWaiting ? '2.5s' : '1.8s'} ease-in-out infinite ${delay}s`,
+                animationPlayState: isProcessing ? 'running' : 'paused',
                 transition: 'border-color 0.3s',
               }} />
             ))}
@@ -175,6 +176,7 @@ export default function SortAnimation({ results, isProcessing, totalProcessed, t
               {/* Color wheel */}
               <svg viewBox="0 0 40 40" width="30" height="30" style={{
                 animation: `ah-spin-slow ${phase === 'analyze' ? '0.6s' : '12s'} linear infinite`,
+                animationPlayState: isProcessing ? 'running' : 'paused',
               }}>
                 <defs>
                   {[['r','#ef4444','#f97316'],['y','#f97316','#eab308'],['g','#eab308','#22c55e'],['c','#22c55e','#3b82f6'],['b','#3b82f6','#a855f7'],['p','#a855f7','#ef4444']].map(([id,a,b]) => (
