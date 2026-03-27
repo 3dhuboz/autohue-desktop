@@ -1,43 +1,58 @@
-# AutoHue — Next Session (CRITICAL FIXES NEEDED)
+# AutoHue — Next Session (v3.3.2)
 
-## Version: v3.2.2
+## CRITICAL: Still Broken
+1. **Animation shows "WAITING..."** — never animates during sort. isProcessing prop is correct but results aren't flowing to trigger animation phases. The SortAnimation component needs results in stats.results to animate, but the capped status endpoint (50 per poll) may not be advancing the cursor.
 
-## CRITICAL BUGS TO FIX FIRST
-1. **Processed count exceeds total (1260/996 = 127%)** — old extracted files from previous sessions are being counted. The cleanup at sort start isn't removing locked files. FIX: each session must use a completely isolated extract directory AND the processed count must be capped at total.
+2. **Gauges show 0s/$0** — TIME SAVED and COST SAVED stay at zero during processing. timeSavedSeconds calculation: `Math.max(0, manualTime - aiTime)` where manualTime = processed * 15 and aiTime = elapsed. If elapsed > manualTime (slow processing), result is 0. The formula is wrong — timeSaved should ALWAYS be processed * 15 regardless of actual speed.
 
-2. **Animation shows "WAITING..."** — isProcessing={phase === 'processing' && !paused} but the animation component might not be receiving the prop correctly, or the results aren't flowing to trigger the animation phases. CHECK: SortAnimation.tsx line ~162, verify isProcessing prop.
+3. **Processed count was exceeding total (1170/996)** — FIXED in v3.3.2 with hard cap in grabBatch + status endpoint clamp. NEEDS TESTING.
 
-3. **Green car classified as black** — prompt says "LARGEST/CLOSEST" but that picks background vehicles. FIX: change to "most PROMINENT/CENTRAL subject — the one the photographer is clearly focusing on. Usually centered in frame, in sharp focus, and the most visually dominant."
+4. **Sort hangs after completion** — stall detector added (15s at 95%+) but untested. The completion check `data.processed >= data.total` should work now that counts are capped.
 
-4. **Completion screen never appears** — status endpoint returns 288KB payload when all results requested at once. FIX APPLIED in v3.0.2: capped to 50 results per poll. VERIFY this works.
+5. **ZIP download** — switched from <a> tag to window.open() for Electron handler. UNTESTED.
 
-5. **Gauges show 0s/0$** — Time Saved and Cost Saved show zero during processing. The timeSavedSeconds calculation needs stats.startTime to be valid.
+6. **History empty** — recordUsage fix applied (UPDATE instead of INSERT OR REPLACE). UNTESTED.
 
-## FEATURES ADDED (need testing)
-- Vehicle type sorting (cars/bikes/people) — Settings toggle
-- Feature shot detection (burnout/wheelstand/flames) — Settings toggle
-- 5 API key rotation — keys in .openrouter-keys file
-- Green loading bar during engine startup
+## What Works Well
+- 5 API key rotation: 4.4 img/sec achieved
+- Gemini 2.0 Flash via OpenRouter
+- Extraction with yauzl pre-scan
+- Color accuracy much improved (cream separate, grey-green → silver-grey)
+- Vehicle type sorting toggle
+- Feature shot detection toggle
 - Auto-publish releases + auto-update clients
+- Green loading bar during engine startup
 
-## PROMPT FIX NEEDED
-Change from:
-"LARGEST/CLOSEST car in this photo"
-To:
-"most PROMINENT car — the one the photographer is clearly focusing on. Usually centered, in sharp focus, and visually dominant. IGNORE parked/background vehicles."
+## Color Categories (13 total)
+red, blue, green, yellow, orange, purple, pink, brown, black, white, silver-grey, cream, please-double-check
 
-## KEY ARCHITECTURE NOTES
-- Worker: worker/server.js → bundled to worker/dist/server.js
-- 5 OpenRouter keys at: %APPDATA%/autohue-desktop/worker-data/.openrouter-keys
+## Known Accuracy Issues
+- Rat rod / patina cars (multi-color) → should go to please-double-check
+- Background vehicles can still influence classification
+- Cream vs yellow edge cases (champagne metallic)
+
+## Architecture
+- Worker: worker/server.js → bundled via esbuild to worker/dist/server.js
+- TWO processing paths exist (potential double-processing bug):
+  - `processSession()` — old pipeline, called from upload endpoint
+  - Phase 2 pipeline — new, called from sort-local endpoint for archives
+  - BOTH call collectImageFiles() and process images
+  - Need to verify only ONE runs per session
+- Renderer: React + Vite, polls /status/:sessionId every 1s
+- 5 keys at: %APPDATA%/autohue-desktop/worker-data/.openrouter-keys
 - Model: google/gemini-2.0-flash-001
-- Batch: 15 images, concurrency = key count (5)
-- CI: .github/workflows/release.yml — builds draft, publishes after both platforms
-- Site: autohue-site repo → Cloudflare Pages at autohue.app
+- CI: draft → build → publish (auto)
 
-## FILES TO EDIT
-- worker/server.js lines ~423-430: classification prompt
-- worker/server.js lines ~368: batch prompt
-- worker/server.js line 2209: BATCH_CONCURRENCY = Math.max(3, OPENROUTER_KEYS.length)
-- renderer/src/pages/SortPage.tsx line ~977: isProcessing prop
-- renderer/src/pages/SortPage.tsx lines ~418-448: completion detection
-- renderer/src/components/SortAnimation.tsx: animation logic
+## Enterprise Roadmap (v4.0.0)
+- License plate / rego reading
+- Cross-event car database
+- Customer portal
+- See ROADMAP.md
+
+## Fix Priority for Next Session
+1. Fix timeSaved formula (always = processed * 15, not dependent on elapsed)
+2. Test completion transition with capped counts
+3. Fix animation — ensure results flow to SortAnimation component
+4. Test ZIP download via window.open()
+5. Test history recording
+6. Investigate double-processing (two code paths)
