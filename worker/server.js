@@ -2531,9 +2531,9 @@ app.get('/status/:sessionId', (req, res) => {
     const session = sessions[req.params.sessionId];
     if (!session) return res.status(404).json({ error: 'Session not found' });
 
-    // Send last N results for live feed (only new ones the client hasn't seen)
+    // Send only NEW results since cursor (cap at 50 to prevent huge payloads)
     const since = parseInt(req.query.since) || 0;
-    const newResults = session.results.slice(since);
+    const newResults = session.results.slice(since, since + 50);
 
     res.json({
         status: session.status,
