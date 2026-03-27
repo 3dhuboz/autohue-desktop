@@ -26,6 +26,19 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm run build
 
+      - name: Upload consistent download name
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          $src = "dist/AutoHue-Setup-$version.exe"
+          $dest = "dist/AutoHue-Setup-Latest.exe"
+          if (Test-Path $src) {
+            Copy-Item $src $dest
+            gh release upload "v$version" $dest --clobber
+          }
+        shell: pwsh
+
   build-mac:
     runs-on: macos-latest
     steps:
