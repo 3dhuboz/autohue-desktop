@@ -519,7 +519,7 @@ export default function SortPage() {
 
   // During extraction: show extraction progress. During classification: show classification progress.
   const progressPct = stats.processed > 0 && stats.total > 0
-    ? Math.round((stats.processed / stats.total) * 100)
+    ? Math.min(100, Math.round((stats.processed / stats.total) * 100))
     : stats.extracted > 0 && stats.total > 0
     ? Math.round((stats.extracted / stats.total) * 100)
     : 0;

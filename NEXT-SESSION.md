@@ -1,52 +1,43 @@
-# AutoHue — Next Session Notes
+# AutoHue — Next Session (CRITICAL FIXES NEEDED)
 
-## Current Version: v3.2.1
+## Version: v3.2.2
 
-## What Works
-- OpenRouter API with 5-key rotation (4.4 img/sec achieved)
-- Gemini 2.0 Flash model (fast, no thinking overhead)
-- ZIP extraction with yauzl pre-scan count
-- Vehicle type sorting toggle (cars/bikes/people)
-- Feature shot detection toggle (burnout/wheelstand/flames/drift/launch)
-- Color accuracy: grey-green metallic -> silver-grey, picks largest car
-- Auto-update via electron-updater
-- Landing page at autohue.app with direct download link
-- CI auto-publishes releases (draft -> publish after both platforms build)
-- Pause/Resume works during both extraction and classification
+## CRITICAL BUGS TO FIX FIRST
+1. **Processed count exceeds total (1260/996 = 127%)** — old extracted files from previous sessions are being counted. The cleanup at sort start isn't removing locked files. FIX: each session must use a completely isolated extract directory AND the processed count must be capped at total.
 
-## Known Issues Still to Verify
-1. **Completion screen** — finalStatsRef added but needs testing with real sort
-2. **Animation stop** — phase check fixed ('processing' not 'sorting'), needs testing
-3. **ZIP download** — switched to window.open(), needs testing
-4. **History** — recordUsage now updates existing rows, needs testing
-5. **Image count** — pre-scan now excludes __MACOSX, total set after extraction
+2. **Animation shows "WAITING..."** — isProcessing={phase === 'processing' && !paused} but the animation component might not be receiving the prop correctly, or the results aren't flowing to trigger the animation phases. CHECK: SortAnimation.tsx line ~162, verify isProcessing prop.
 
-## Architecture
-- Electron app: electron/main.js, electron/preload.js, electron/worker-manager.js
-- Worker: worker/server.js (bundled to worker/dist/server.js via esbuild)
-- Renderer: renderer/src/ (React + Vite)
-- Site: separate repo (autohue-site on Cloudflare Pages at autohue.app)
+3. **Green car classified as black** — prompt says "LARGEST/CLOSEST" but that picks background vehicles. FIX: change to "most PROMINENT/CENTRAL subject — the one the photographer is clearly focusing on. Usually centered in frame, in sharp focus, and the most visually dominant."
 
-## API Keys
-- 5 OpenRouter keys in .openrouter-keys (newline-separated)
-- Path: %APPDATA%/autohue-desktop/worker-data/.openrouter-keys
-- DB: settings table (openrouter_api_keys as JSON array)
-- Worker merges from env var + keyfile + single keyfile (deduplicated via Set)
-- Round-robin rotation with 10s backoff on rate limit
+4. **Completion screen never appears** — status endpoint returns 288KB payload when all results requested at once. FIX APPLIED in v3.0.2: capped to 50 results per poll. VERIFY this works.
 
-## Key Files
-- worker/server.js — ALL classification logic, API calls, file sorting
-- renderer/src/pages/SortPage.tsx — main UI, polling, completion detection
-- renderer/src/pages/SettingsPage.tsx — settings toggles
-- electron/main.js — IPC handlers, worker lifecycle
-- electron/worker-manager.js — forks/manages worker process
-- scripts/build-worker.js — esbuild bundle + native module copy
+5. **Gauges show 0s/0$** — Time Saved and Cost Saved show zero during processing. The timeSavedSeconds calculation needs stats.startTime to be valid.
 
-## Enterprise Feature (Planned for v4.0.0)
-- License plate / rego reading from photos
-- Car make/model identification
-- Per-vehicle folders (by rego: CAL4SX/, by model: HSV-Clubsport/)
-- Cross-event database (SQLite: plate -> car_id -> [photos across events])
-- Customer portal for car owners to find their photos
-- Auto-notify owners when new photos available
-- See ROADMAP.md for full details
+## FEATURES ADDED (need testing)
+- Vehicle type sorting (cars/bikes/people) — Settings toggle
+- Feature shot detection (burnout/wheelstand/flames) — Settings toggle
+- 5 API key rotation — keys in .openrouter-keys file
+- Green loading bar during engine startup
+- Auto-publish releases + auto-update clients
+
+## PROMPT FIX NEEDED
+Change from:
+"LARGEST/CLOSEST car in this photo"
+To:
+"most PROMINENT car — the one the photographer is clearly focusing on. Usually centered, in sharp focus, and visually dominant. IGNORE parked/background vehicles."
+
+## KEY ARCHITECTURE NOTES
+- Worker: worker/server.js → bundled to worker/dist/server.js
+- 5 OpenRouter keys at: %APPDATA%/autohue-desktop/worker-data/.openrouter-keys
+- Model: google/gemini-2.0-flash-001
+- Batch: 15 images, concurrency = key count (5)
+- CI: .github/workflows/release.yml — builds draft, publishes after both platforms
+- Site: autohue-site repo → Cloudflare Pages at autohue.app
+
+## FILES TO EDIT
+- worker/server.js lines ~423-430: classification prompt
+- worker/server.js lines ~368: batch prompt
+- worker/server.js line 2209: BATCH_CONCURRENCY = Math.max(3, OPENROUTER_KEYS.length)
+- renderer/src/pages/SortPage.tsx line ~977: isProcessing prop
+- renderer/src/pages/SortPage.tsx lines ~418-448: completion detection
+- renderer/src/components/SortAnimation.tsx: animation logic
