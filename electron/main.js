@@ -61,12 +61,17 @@ function createWindow() {
     return { action: 'deny' };
   });
 
-  // Track download completion and notify renderer
+  // Track download completion — show save dialog for large ZIPs
   mainWindow.webContents.session.on('will-download', (event, item) => {
+    const filename = item.getFilename() || 'sorted_photos.zip';
+    // Let Electron show its save dialog (default behavior)
+    // The item already has a suggested filename
+    item.setSuggestedFilename(filename);
+
     item.once('done', (e, state) => {
       if (mainWindow && !mainWindow.isDestroyed()) {
         if (state === 'completed') {
-          mainWindow.webContents.send('download:complete', { path: item.getSavePath(), filename: item.getFilename() });
+          mainWindow.webContents.send('download:complete', { path: item.getSavePath(), filename });
         } else if (state === 'cancelled') {
           mainWindow.webContents.send('download:cancelled');
         }

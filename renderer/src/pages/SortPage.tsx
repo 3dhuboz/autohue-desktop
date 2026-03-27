@@ -62,6 +62,7 @@ type Phase = 'upload' | 'processing' | 'complete';
 interface ProcessingStats {
   processed: number;
   total: number;
+  extracted: number;
   currentFile: string;
   startTime: number;
   imagesPerSecond: number;
@@ -102,7 +103,7 @@ export default function SortPage() {
   const [extractionPhase, setExtractionPhase] = useState<{ active: boolean; extracted: number; total: number; currentFile: string }>({ active: false, extracted: 0, total: 0, currentFile: '' });
   const [stats, setStats] = useState<ProcessingStats>({
     processed: 0, total: 0, currentFile: '', startTime: 0,
-    imagesPerSecond: 0, avgConfidence: 0, timeSavedSeconds: 0,
+    extracted: 0, imagesPerSecond: 0, avgConfidence: 0, timeSavedSeconds: 0,
     results: [], colorCounts: {},
   });
   const [dragOver, setDragOver] = useState(false);
@@ -363,18 +364,36 @@ export default function SortPage() {
           setPaused(false);
           // Update total when transitioning from extracting to processing
           if (data.total && data.total > 0) {
-            setStats(prev => ({ ...prev, total: data.total }));
+            setStats(prev => ({ ...prev, total: data.total, extracted: data.extracted || prev.extracted }));
+          }
+          if (data.extracted) {
+            setStats(prev => ({ ...prev, extracted: data.extracted, currentFile: data.current_file || prev.currentFile }));
           }
         }
 
         if (data.status === 'completed' || data.status === 'cancelled') {
           if (pollRef.current) clearInterval(pollRef.current);
           localStorage.removeItem('autohue_active_session');
+          // Capture final stats BEFORE changing phase
+          const finalProcessed = data.processed || stats.processed || 0;
+          const finalColorCounts = data.color_counts || stats.colorCounts || {};
+          const elapsed = Math.max(1, Math.round((Date.now() - (stats.startTime || Date.now())) / 1000));
+          const finalIps = elapsed > 0 ? finalProcessed / elapsed : stats.imagesPerSecond;
+          const finalTimeSaved = finalProcessed * 15; // 15s per manual sort
+          setStats(prev => ({
+            ...prev,
+            processed: finalProcessed,
+            total: data.total || prev.total,
+            colorCounts: finalColorCounts,
+            imagesPerSecond: finalIps > 0 ? finalIps : prev.imagesPerSecond,
+            timeSavedSeconds: finalTimeSaved,
+            results: prev.results,
+          }));
           setPhase('complete');
           if (!completionRecorded.current) {
             completionRecorded.current = true;
-            const processed = data.processed || 0;
-            const colorCounts = data.color_counts || {};
+            const processed = finalProcessed;
+            const colorCounts = finalColorCounts;
             const colors = Object.keys(colorCounts).length;
             recordUsage(sid, processed, colorCounts).then(() => refreshLicense()).catch(console.error);
 
@@ -442,7 +461,12 @@ export default function SortPage() {
     }
   };
 
-  const progressPct = stats.total > 0 ? Math.round((stats.processed / stats.total) * 100) : 0;
+  // During extraction: show extraction progress. During classification: show classification progress.
+  const progressPct = stats.processed > 0 && stats.total > 0
+    ? Math.round((stats.processed / stats.total) * 100)
+    : stats.extracted > 0 && stats.total > 0
+    ? Math.round((stats.extracted / stats.total) * 100)
+    : 0;
   const speedPct = Math.min((stats.imagesPerSecond / 10) * 100, 100);
   const confPct = stats.avgConfidence * 100;
   const timeSavedFormatted = formatTimeSaved(stats.timeSavedSeconds);
@@ -858,19 +882,16 @@ export default function SortPage() {
                 <span className="text-white/50 flex items-center gap-2">
                   {!paused && <SpinnerIcon size={14} className="text-racing-500" />}
                   {paused && <span className="w-3.5 h-3.5 rounded-full bg-amber-500/50" />}
-                  {stats.total === 0 && stats.processed === 0 && stats.currentFile?.toLowerCase().includes('extract')
-                    ? <span className="text-amber-400">{stats.currentFile}</span>
-                    : stats.total === 0 && stats.processed === 0
-                    ? <span className="text-amber-400/80">
-                        Preparing — extracting archive and discovering images...
-                        <span className="inline-block ml-2 text-[10px] text-white/30 animate-pulse">This may take a moment for large files</span>
-                      </span>
-                    : stats.currentFile ? `Processing: ${stats.currentFile}` : 'Starting...'
+                  {stats.processed === 0 && stats.extracted > 0 && stats.extracted < stats.total
+                    ? <span className="text-amber-400">Extracting archive... {stats.extracted} / {stats.total} images</span>
+                    : stats.processed === 0 && stats.total === 0
+                    ? <span className="text-amber-400/80">Preparing — scanning archive...<span className="inline-block ml-2 text-[10px] text-white/30 animate-pulse">This may take a moment</span></span>
+                    : stats.currentFile ? `Processing: ${stats.currentFile}` : 'Classifying...'
                   }
                 </span>
                 <span className="digital-readout text-white/60">
-                  {stats.total === 0 && stats.processed === 0
-                    ? <span className="text-amber-400/60 text-xs animate-pulse">extracting...</span>
+                  {stats.processed === 0 && stats.extracted > 0
+                    ? <span className="text-amber-400/80">{stats.extracted} / {stats.total}</span>
                     : `${stats.processed} / ${stats.total}`
                   }
                 </span>
@@ -1122,7 +1143,16 @@ export default function SortPage() {
             {/* Actions */}
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-4">
               <button
-                onClick={() => window.open(`${workerUrl}/download/${sessionId}`, '_blank')}
+                onClick={() => {
+                  showToast('Building ZIP — this may take a moment for large batches...', 'info');
+                  // Use an anchor tag to trigger Electron's download handler
+                  const a = document.createElement('a');
+                  a.href = `${workerUrl}/download/${sessionId}`;
+                  a.download = `sorted_photos_${new Date().toISOString().slice(0,10)}.zip`;
+                  document.body.appendChild(a);
+                  a.click();
+                  document.body.removeChild(a);
+                }}
                 className="btn-racing btn-ripple px-10 py-4 rounded-2xl text-lg shadow-xl glow-red flex items-center gap-3 transition-transform hover:scale-[1.02] active:scale-[0.98]"
               >
                 <DownloadIcon size={20} /> Download Sorted ZIP
