@@ -2,14 +2,16 @@ const crypto = require('crypto');
 const os = require('os');
 
 // License tier definitions
-// Pricing: Trial=free, Hobbyist=$9/mo, Pro=$29/mo, Unlimited=$79/mo
-// AI cost per image: ~$0.005 (Claude Sonnet 4)
-// Value per image: ~$1.61 saved vs manual sorting
+// Pricing: Trial=free, Starter=$29/mo, Pro=$79/mo, Business=$149/mo
+// AI cost per image: ~$0.003 (Gemini 2.0 Flash via OpenRouter)
 const TIERS = {
-  TRL: { name: 'Trial', dailyLimit: 50, label: 'trial', price: 0 },
-  HOB: { name: 'Hobbyist', dailyLimit: 500, label: 'hobbyist', price: 9 },
-  PRO: { name: 'Pro', dailyLimit: 2000, label: 'pro', price: 29 },
-  UNL: { name: 'Unlimited', dailyLimit: 5000, label: 'unlimited', price: 79 },
+  TRL: { name: 'Trial', dailyLimit: 25, label: 'trial', price: 0 },
+  STR: { name: 'Starter', dailyLimit: 150, label: 'starter', price: 29 },
+  PRO: { name: 'Pro', dailyLimit: 500, label: 'pro', price: 79 },
+  BIZ: { name: 'Business', dailyLimit: 2000, label: 'business', price: 149 },
+  // Legacy tiers (backward compat)
+  HOB: { name: 'Starter', dailyLimit: 150, label: 'starter', price: 29 },
+  UNL: { name: 'Business', dailyLimit: 2000, label: 'business', price: 149 },
 };
 
 // Grace period: 7 days offline before requiring re-validation
