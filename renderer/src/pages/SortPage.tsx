@@ -291,6 +291,16 @@ export default function SortPage() {
         if (res.status === 404) return;
         const data = await res.json();
 
+        // ALWAYS update extraction/total/currentFile (even when no new classification results)
+        setStats(prev => {
+          const updated = { ...prev };
+          if (data.total > 0) updated.total = data.total;
+          if (data.extracted) updated.extracted = data.extracted;
+          if (data.current_file) updated.currentFile = data.current_file;
+          if (data.processed > 0) updated.processed = data.processed;
+          return updated;
+        });
+
         if (data.new_results?.length) {
           cursorRef.current += data.new_results.length;
           setStats(prev => {
@@ -324,6 +334,7 @@ export default function SortPage() {
             return {
               ...prev, processed,
               total: data.total || prev.total,
+              extracted: data.extracted || prev.extracted,
               currentFile: data.current_file || prev.currentFile,
               imagesPerSecond: smoothIps,
               avgConfidence: smoothConf,
@@ -882,16 +893,16 @@ export default function SortPage() {
                 <span className="text-white/50 flex items-center gap-2">
                   {!paused && <SpinnerIcon size={14} className="text-racing-500" />}
                   {paused && <span className="w-3.5 h-3.5 rounded-full bg-amber-500/50" />}
-                  {stats.processed === 0 && stats.extracted > 0 && stats.extracted < stats.total
-                    ? <span className="text-amber-400">Extracting archive... {stats.extracted} / {stats.total} images</span>
+                  {stats.processed === 0 && stats.extracted > 0
+                    ? <span className="text-green-400 font-bold">Extracting archive — {stats.extracted} of {stats.total || '?'} images</span>
                     : stats.processed === 0 && stats.total === 0
-                    ? <span className="text-amber-400/80">Preparing — scanning archive...<span className="inline-block ml-2 text-[10px] text-white/30 animate-pulse">This may take a moment</span></span>
-                    : stats.currentFile ? `Processing: ${stats.currentFile}` : 'Classifying...'
+                    ? <span className="text-amber-400/80">Scanning archive...</span>
+                    : stats.currentFile ? `Classifying: ${stats.currentFile}` : 'Classifying...'
                   }
                 </span>
-                <span className="digital-readout text-white/60">
+                <span className="digital-readout text-white/60 text-lg font-bold">
                   {stats.processed === 0 && stats.extracted > 0
-                    ? <span className="text-amber-400/80">{stats.extracted} / {stats.total}</span>
+                    ? <span className="text-green-400">{stats.extracted} / {stats.total || '?'}</span>
                     : `${stats.processed} / ${stats.total}`
                   }
                 </span>
@@ -899,7 +910,7 @@ export default function SortPage() {
               <div className="w-full bg-white/5 rounded-full h-4 overflow-hidden relative">
                 <div
                   className="h-4 rounded-full transition-all duration-700 ease-out relative"
-                  style={{ width: `${progressPct}%`, background: 'linear-gradient(90deg, #dc2626, #ef4444, #f97316)' }}
+                  style={{ width: `${progressPct}%`, background: stats.processed === 0 && stats.extracted > 0 ? 'linear-gradient(90deg, #16a34a, #22c55e, #4ade80)' : 'linear-gradient(90deg, #dc2626, #ef4444, #f97316)' }}
                 >
                   <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent animate-pulse" />
                 </div>
