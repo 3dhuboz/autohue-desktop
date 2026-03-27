@@ -2174,8 +2174,8 @@ app.post('/sort-local', async (req, res) => {
                 // Extract everything
                 if (/\.zip$/i.test(inputPath)) {
                     let pendingWrites = 0;
-                    await new Promise((resolve, reject) => {
-                        const stream = fs.createReadStream(inputPath)
+                    await new Promise((resolve) => {
+                        fs.createReadStream(inputPath)
                             .pipe(unzipper.Parse())
                             .on('entry', (entry) => {
                                 const fileName = path.basename(entry.path);
@@ -2202,16 +2202,23 @@ app.post('/sort-local', async (req, res) => {
                                 }
                             })
                             .on('close', () => {
-                                // Wait for all writes to finish
                                 const waitForWrites = () => {
                                     if (pendingWrites <= 0) resolve();
                                     else setTimeout(waitForWrites, 100);
                                 };
                                 waitForWrites();
                             })
-                            .on('error', reject);
+                            .on('error', (err) => {
+                                // ZIP may have trailing corruption but images are already extracted
+                                console.warn(`[${sessionId}] ZIP stream error (continuing): ${err.message}`);
+                                const waitForWrites = () => {
+                                    if (pendingWrites <= 0) resolve();
+                                    else setTimeout(waitForWrites, 100);
+                                };
+                                setTimeout(waitForWrites, 500); // brief delay for final writes
+                            });
                     });
-                    fs.appendFileSync(path.join(STORAGE_ROOT, 'phase2-debug.log'), `${new Date().toISOString()} EXTRACTION DONE: ${extractedCount} extracted\n`);
+                    console.log(`[${sessionId}] Extraction finished: ${extractedCount} files`);
                 } else if (/\.rar$/i.test(inputPath)) {
                     await extractRar(inputPath, extractDir, session);
                 }
