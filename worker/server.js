@@ -109,6 +109,11 @@ if (!CLAUDE_API_KEY) {
     } catch { /* ignore */ }
 }
 
+// ─── Vehicle type sorting ───
+let SORT_BY_TYPE = process.env.SORT_BY_TYPE === 'true' || false;
+const VALID_TYPES = new Set(['car', 'motorcycle', 'person', 'truck', 'other']);
+const TYPE_FOLDERS = { car: 'cars', motorcycle: 'bikes', person: 'people', truck: 'trucks', other: 'other' };
+
 function getActiveEngine() {
     if (OPENROUTER_KEYS.length > 0) return 'openrouter';
     if (CLAUDE_API_KEY) return 'claude';
@@ -135,6 +140,10 @@ process.on('message', (msg) => {
     }
     if (msg.type === 'set-claude-key' && msg.key) {
         CLAUDE_API_KEY = msg.key;
+    }
+    if (msg.type === 'set-sort-by-type') {
+        SORT_BY_TYPE = !!msg.enabled;
+        console.log(`[config] Sort by vehicle type: ${SORT_BY_TYPE}`);
     }
 });
 
@@ -365,7 +374,7 @@ async function classifyMiniBatch(imageBuffers, retries = 3) {
         }
         content.push({
             type: 'text',
-            text: `${imageBuffers.length} photos above. For each, reply with the car's BODY PAINT color. ${imageBuffers.length} lines, one word each from: red, blue, green, yellow, orange, purple, pink, brown, black, white, silver-grey. IGNORE backgrounds. Dark charcoal/gunmetal = silver-grey. Gold/bronze = yellow.`,
+            text: `${imageBuffers.length} photos above. For each, reply with the car's BODY PAINT color. ${imageBuffers.length} lines, one word each from: red, blue, green, yellow, orange, purple, pink, brown, black, white, silver-grey. IGNORE backgrounds/grass/smoke/track. Dark charcoal/gunmetal/grey-green metallic/sage/olive = silver-grey. Gold/bronze = yellow. Only "green" for vivid bright green.`,
         });
 
         const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -420,7 +429,9 @@ async function classifySingleImage(imageBuffer, retries = 3) {
             },
             {
                 type: 'text',
-                text: 'What is the BODY/PAINT color of the main car/vehicle in this photo? Reply with ONLY one word from: red, blue, green, yellow, orange, purple, pink, brown, black, white, silver-grey. RULES: Focus ONLY on the car body paint. IGNORE smoke, asphalt, sky, grass, barriers. Dark charcoal/gunmetal = silver-grey. Gold/bronze metallic = yellow.',
+                text: SORT_BY_TYPE
+                    ? 'Identify the main subject and its color. Reply with EXACTLY two words: TYPE COLOR. TYPE must be one of: car, motorcycle, person, truck, other. COLOR must be one of: red, blue, green, yellow, orange, purple, pink, brown, black, white, silver-grey. Example: "car white" or "motorcycle red" or "person black". RULES: Focus on the MAIN subject. Dark charcoal/gunmetal/grey-green metallic/sage/olive = silver-grey. Only "green" for vivid bright green. For people, use their clothing color.'
+                    : 'What is the BODY/PAINT color of the LARGEST/CLOSEST car in this photo? Reply with ONLY one word from: red, blue, green, yellow, orange, purple, pink, brown, black, white, silver-grey. RULES: If multiple cars, pick the BIGGEST one in frame. Focus ONLY on car body paint. IGNORE smoke, asphalt, sky, grass, barriers, track. Dark charcoal/gunmetal/grey-green metallic/sage/olive = silver-grey. Gold/bronze metallic = yellow. Only "green" for vivid bright green.',
             },
         ];
 
@@ -453,10 +464,29 @@ async function classifySingleImage(imageBuffer, retries = 3) {
         }
 
         const data = await res.json();
-        const rawText = (data.choices?.[0]?.message?.content || '').trim().toLowerCase().replace(/[^a-z-]/g, '');
-        const mapped = COLOR_MAP[rawText] || rawText;
-        if (VALID_COLORS.has(mapped)) {
-            return { category: mapped, confidence: 0.95, method: 'openrouter' };
+        const rawText = (data.choices?.[0]?.message?.content || '').trim().toLowerCase();
+
+        if (SORT_BY_TYPE) {
+            // Parse "type color" format
+            const parts = rawText.replace(/[^a-z- ]/g, '').split(/\s+/);
+            const type = parts[0] || 'other';
+            const colorRaw = parts[1] || parts[0] || '';
+            const mappedType = VALID_TYPES.has(type) ? type : 'car';
+            const mappedColor = COLOR_MAP[colorRaw] || colorRaw;
+            if (VALID_COLORS.has(mappedColor)) {
+                return { category: mappedColor, vehicleType: mappedType, confidence: 0.95, method: 'openrouter' };
+            }
+            // If only one word returned, treat as color with type=car
+            const singleColor = COLOR_MAP[type] || type;
+            if (VALID_COLORS.has(singleColor)) {
+                return { category: singleColor, vehicleType: 'car', confidence: 0.95, method: 'openrouter' };
+            }
+        } else {
+            const cleaned = rawText.replace(/[^a-z-]/g, '');
+            const mapped = COLOR_MAP[cleaned] || cleaned;
+            if (VALID_COLORS.has(mapped)) {
+                return { category: mapped, confidence: 0.95, method: 'openrouter' };
+            }
         }
         console.warn(`[vision] Unrecognized: "${rawText}"`);
         return null;
@@ -2290,10 +2320,16 @@ app.post('/sort-local', async (req, res) => {
                             }
 
                             const needsReview = colorInfo.category === 'unknown' || colorInfo.confidence === 'none' || colorInfo.confidence === 'very-low';
-                            const folderName = needsReview ? 'please-double-check' : colorInfo.category;
+                            const colorName = needsReview ? 'please-double-check' : colorInfo.category;
 
-                            // Copy file (non-blocking)
-                            const colorFolder = path.join(outputDir, folderName);
+                            // Build folder path: type/color when type sorting enabled, else just color
+                            let colorFolder;
+                            if (SORT_BY_TYPE && colorInfo.vehicleType) {
+                                const typeFolder = TYPE_FOLDERS[colorInfo.vehicleType] || 'other';
+                                colorFolder = path.join(outputDir, typeFolder, colorName);
+                            } else {
+                                colorFolder = path.join(outputDir, colorName);
+                            }
                             fs.mkdirSync(colorFolder, { recursive: true });
                             let destName = file;
                             let counter = 1;

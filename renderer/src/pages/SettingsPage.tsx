@@ -88,6 +88,7 @@ export default function SettingsPage({ license, onRefresh }: Props) {
   const [orStatus, setOrStatus] = useState<{ hasKey: boolean } | null>(null);
   const [showOrInput, setShowOrInput] = useState(false);
   const [orSaving, setOrSaving] = useState(false);
+  const [sortByType, setSortByType] = useState(false);
   const [orTesting, setOrTesting] = useState(false);
 
   useEffect(() => {
@@ -96,6 +97,7 @@ export default function SettingsPage({ license, onRefresh }: Props) {
     window.electronAPI.getSetting('output_folder').then(v => setOutputFolder(v || ''));
     window.electronAPI.getClaudeKeyStatus().then(setClaudeStatus);
     window.electronAPI.getOpenRouterKeyStatus().then(setOrStatus);
+    window.electronAPI.getSetting('sort_by_type').then(v => setSortByType(v === 'true'));
   }, []);
 
   const handleSelectOutput = async () => {
@@ -408,6 +410,31 @@ export default function SettingsPage({ license, onRefresh }: Props) {
             </div>
           </div>
         )}
+      </div>
+
+      {/* ─── Sort Options ─────────────────────────────────── */}
+      <div className="glass-card rounded-2xl p-6 space-y-4">
+        <h3 className="text-sm font-heading font-bold flex items-center gap-2">
+          <span className="text-lg">🚗</span> Sort Options
+        </h3>
+
+        <div className="flex items-center justify-between">
+          <div>
+            <span className="text-xs text-white/70 font-heading font-bold block">Sort by Vehicle Type</span>
+            <span className="text-[10px] text-white/30">Separate cars, bikes, people into subfolders (cars/white/, bikes/red/)</span>
+          </div>
+          <button
+            onClick={async () => {
+              const current = await window.electronAPI.getSetting('sort_by_type');
+              const next = current === 'true' ? 'false' : 'true';
+              await window.electronAPI.setSetting('sort_by_type', next);
+              setSortByType(next === 'true');
+            }}
+            className={`relative w-11 h-6 rounded-full transition-colors ${sortByType ? 'bg-racing-500' : 'bg-white/10'}`}
+          >
+            <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${sortByType ? 'translate-x-5' : ''}`} />
+          </button>
+        </div>
       </div>
 
       {/* ─── Watermark Editor ─────────────────────────────────── */}

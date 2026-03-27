@@ -162,10 +162,14 @@ app.whenReady().then(async () => {
   if (claudeKey) { fs.writeFileSync(claudeKeyPath, claudeKey, 'utf8'); } else { try { fs.unlinkSync(claudeKeyPath); } catch {} }
   if (openRouterKeys.length > 0) { fs.writeFileSync(orKeysPath, openRouterKeys.join('\n'), 'utf8'); }
 
+  const sortByTypeRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('sort_by_type');
+  const sortByType = sortByTypeRow ? sortByTypeRow.value === 'true' : false;
+
   workerManager = new WorkerManager(storagePath);
   if (claudeKey) workerManager.setClaudeApiKey(claudeKey);
   workerManager.openRouterKeys = openRouterKeys;
   workerManager.visionModel = visionModel;
+  workerManager.sortByType = sortByType;
   workerManager.start().catch(err => {
     console.error('Worker failed to start:', err.message);
   });
@@ -291,6 +295,10 @@ ipcMain.handle('settings:get', (_, key) => {
 
 ipcMain.handle('settings:set', (_, key, value) => {
   db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(key, value);
+  // Forward relevant settings to worker
+  if (key === 'sort_by_type' && workerManager?.process) {
+    workerManager.process.send({ type: 'set-sort-by-type', enabled: value === 'true' });
+  }
   return true;
 });
 
