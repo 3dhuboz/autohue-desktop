@@ -596,13 +596,51 @@ export default function SortPage() {
               </div>
             )}
 
-            {/* Worker loading state */}
+            {/* Worker loading state — animated green progress bar */}
             {!workerReady && (
-              <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl px-4 py-3 text-sm text-amber-400 flex items-center gap-3">
-                <SpinnerIcon size={16} className="text-amber-400 shrink-0" />
-                <div>
-                  <span className="font-semibold">AI engine is loading</span>
-                  <span className="text-amber-400/60 ml-1">— this may take a moment on first launch.</span>
+              <div className="bg-white/[0.03] border border-white/10 rounded-xl p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-green-500/10 flex items-center justify-center">
+                      <SpinnerIcon size={16} className="text-green-400" />
+                    </div>
+                    <div>
+                      <span className="text-sm font-heading font-bold text-white/80">Starting AI Engine</span>
+                      <span className="text-[10px] text-white/30 block">
+                        {health?.ssdMobilenet === 'loaded' ? 'Loading vision models...' : 'Initializing worker...'}
+                      </span>
+                    </div>
+                  </div>
+                  <span className="text-xs text-green-400 font-mono">
+                    {health?.ssdMobilenet === 'loaded' && health?.visionEngine === 'openrouter' ? '90%' :
+                     health?.ssdMobilenet === 'loaded' ? '60%' :
+                     health ? '30%' : '10%'}
+                  </span>
+                </div>
+                <div className="w-full bg-white/5 rounded-full h-2.5 overflow-hidden">
+                  <div
+                    className="h-2.5 rounded-full transition-all duration-1000 ease-out"
+                    style={{
+                      width: health?.ssdMobilenet === 'loaded' && health?.visionEngine === 'openrouter' ? '90%' :
+                             health?.ssdMobilenet === 'loaded' ? '60%' :
+                             health ? '30%' : '10%',
+                      background: 'linear-gradient(90deg, #16a34a, #22c55e, #4ade80)',
+                    }}
+                  />
+                </div>
+                <div className="flex items-center gap-4 text-[10px] text-white/20">
+                  <span className={health ? 'text-green-400' : ''}>
+                    {health ? '✓' : '○'} Worker
+                  </span>
+                  <span className={health?.ssdMobilenet === 'loaded' ? 'text-green-400' : ''}>
+                    {health?.ssdMobilenet === 'loaded' ? '✓' : '○'} Object Detection
+                  </span>
+                  <span className={health?.visionEngine === 'openrouter' ? 'text-green-400' : ''}>
+                    {health?.visionEngine === 'openrouter' ? '✓' : '○'} AI Vision
+                  </span>
+                  <span className={workerReady ? 'text-green-400' : ''}>
+                    ○ Ready
+                  </span>
                 </div>
               </div>
             )}
