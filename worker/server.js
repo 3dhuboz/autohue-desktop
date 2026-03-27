@@ -326,25 +326,17 @@ function parseColorLines(rawText, expectedCount) {
 }
 
 // ─── OpenRouter single-image classifier (1 image per call = maximum accuracy) ───
-const OPENROUTER_BATCH_SIZE = 10; // 10 images per batch cycle (mix of batch calls + parallel)
+const OPENROUTER_BATCH_SIZE = 15; // 15 single-image calls in parallel per batch cycle
 
 async function classifyBatchWithOpenRouter(imageBuffers) {
     if (OPENROUTER_KEYS.length === 0 || imageBuffers.length === 0) return null;
 
-    // Split into mini-batches of 3 images each, run 3 mini-batches in parallel
-    // 3 images per API call = model can easily track order
-    // 3 parallel calls = 9 images per cycle per worker
-    const MINI_BATCH = 3;
-    const chunks = [];
-    for (let i = 0; i < imageBuffers.length; i += MINI_BATCH) {
-        chunks.push(imageBuffers.slice(i, i + MINI_BATCH));
-    }
+    // Single image per API call — 100% accurate, no order confusion
+    // Run ALL images in parallel for max speed with multi-key rotation
+    const results = await Promise.all(
+        imageBuffers.map(buf => classifySingleImage(buf).catch(() => null))
+    );
 
-    // Run all chunks in parallel
-    const chunkResults = await Promise.all(chunks.map(chunk => classifyMiniBatch(chunk)));
-
-    // Flatten results back to match input order
-    const results = chunkResults.flat();
     const validCount = results.filter(r => r !== null).length;
     console.log(`  [vision] ${validCount}/${imageBuffers.length}: ${results.map(r => r?.category || '?').join(', ')}`);
     return results;
