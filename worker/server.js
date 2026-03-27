@@ -1739,7 +1739,8 @@ async function extractZip(archivePath, destDir, session) {
                 const fileName = path.basename(entry.path);
                 if (/\.(jpg|jpeg|png|gif|bmp|webp)$/i.test(fileName) && !fileName.startsWith('.') && !fileName.startsWith('__')) {
                     count++;
-                    session.currentFile = `Extracting: ${fileName} (${count}${session.total > 0 ? '/' + session.total : ''})`;
+                    session.extracted = count;
+                    session.currentFile = `Extracting: ${fileName} (${count}${session.total > 0 ? ' of ' + session.total : ''})`;
 
                     // Handle duplicate names
                     let destName = fileName;
@@ -2204,9 +2205,8 @@ app.post('/sort-local', async (req, res) => {
                 }
 
                 // ── BATCH + CONCURRENT PROCESSING ──
-                // Gemini: 3 workers × 15 images = 45 images per cycle
-                // Claude: 3 workers × 6 images = 18 images per cycle
-                const BATCH_CONCURRENCY = 3;
+                // Concurrency = number of API keys (each worker uses its own key)
+                const BATCH_CONCURRENCY = Math.max(3, OPENROUTER_KEYS.length);
                 const activeBatchSize = getVisionBatchSize();
                 const activeEngine = getActiveEngine();
                 console.log(`[${sessionId}] Engine: ${activeEngine}, batch: ${activeBatchSize}, concurrency: ${BATCH_CONCURRENCY}`);

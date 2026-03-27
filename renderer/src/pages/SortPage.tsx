@@ -114,6 +114,7 @@ export default function SortPage() {
   const lastRecordedCount = useRef(0);
   const speedHistory = useRef<number[]>([]);
   const confHistory = useRef<number[]>([]);
+  const finalStatsRef = useRef<{ processed: number; total: number; elapsed: number; ips: number; timeSaved: number; colorCounts: Record<string, number>; avgConf: number } | null>(null);
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -421,12 +422,19 @@ export default function SortPage() {
         if (isComplete) {
           if (pollRef.current) clearInterval(pollRef.current);
           localStorage.removeItem('autohue_active_session');
-          // Capture final stats BEFORE changing phase
+          // Capture final stats BEFORE changing phase — use ref for guaranteed access
           const finalProcessed = data.processed || stats.processed || 0;
           const finalColorCounts = data.color_counts || stats.colorCounts || {};
           const elapsed = Math.max(1, Math.round((Date.now() - (stats.startTime || Date.now())) / 1000));
           const finalIps = elapsed > 0 ? finalProcessed / elapsed : stats.imagesPerSecond;
           const finalTimeSaved = finalProcessed * 15; // 15s per manual sort
+          const finalConf = stats.avgConfidence > 0 ? stats.avgConfidence : 0.95;
+          // Store in ref so completion screen always has data
+          finalStatsRef.current = {
+            processed: finalProcessed, total: data.total || stats.total,
+            elapsed, ips: finalIps, timeSaved: finalTimeSaved,
+            colorCounts: finalColorCounts, avgConf: finalConf,
+          };
           setStats(prev => ({
             ...prev,
             processed: finalProcessed,
@@ -434,6 +442,7 @@ export default function SortPage() {
             colorCounts: finalColorCounts,
             imagesPerSecond: finalIps > 0 ? finalIps : prev.imagesPerSecond,
             timeSavedSeconds: finalTimeSaved,
+            avgConfidence: finalConf,
             results: prev.results,
           }));
           setPhase('complete');
@@ -846,7 +855,7 @@ export default function SortPage() {
             </div>
 
             {/* ── Extraction Phase UI — show when no images classified yet ── */}
-            {stats.processed === 0 && phase === 'sorting' && (
+            {stats.processed === 0 && phase === 'processing' && (
               <div className="glass-card rounded-3xl p-8 text-center animate-fade-up">
                 {/* Big animated archive icon */}
                 <div className="relative inline-flex items-center justify-center mb-6">
@@ -912,7 +921,7 @@ export default function SortPage() {
             )}
 
             {/* Gauges — hide when nothing classified yet (extraction/prep phase) */}
-            <div className={`glass-card rounded-3xl p-6 ${stats.processed === 0 && phase === 'sorting' ? 'hidden' : ''}`}>
+            <div className={`glass-card rounded-3xl p-6 ${stats.processed === 0 && phase === 'processing' ? 'hidden' : ''}`}>
               <div className="grid grid-cols-3 lg:grid-cols-6 gap-4 items-start">
                 <TachoGauge value={speedPct} max={10} label="SPEED" unit="img/sec" displayValue={stats.imagesPerSecond.toFixed(1)} size={150} variant="red" redZoneStart={80} subtitle={stats.imagesPerSecond > 0 ? `~${(1/stats.imagesPerSecond).toFixed(1)}s each` : ''} />
                 <TachoGauge value={progressPct} max={100} label="PROGRESS" unit={`${stats.processed}/${stats.total}`} displayValue={`${progressPct}%`} size={150} variant="amber" redZoneStart={90} />
@@ -965,7 +974,7 @@ export default function SortPage() {
                   color: r.color || 'unknown',
                   thumb: r.thumb ? `${workerUrl}${r.thumb}` : null,
                 }))}
-                isProcessing={phase === 'sorting' && !paused}
+                isProcessing={phase === 'processing' && !paused}
                 totalProcessed={stats.processed}
                 totalImages={stats.total}
               />
@@ -1077,37 +1086,48 @@ export default function SortPage() {
               <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-gradient-to-br from-racing-600 to-racing-800 mb-6 glow-red">
                 <CheckIcon size={36} className="text-white" />
               </div>
+              {(() => {
+                const fs = finalStatsRef.current;
+                const p = fs?.processed || stats.processed || 0;
+                const cc = fs?.colorCounts || stats.colorCounts || {};
+                const ips = fs?.ips || stats.imagesPerSecond || 0;
+                const ts = fs?.timeSaved || stats.timeSavedSeconds || p * 15;
+                const tsFormatted = ts >= 3600 ? `${Math.floor(ts/3600)}h ${Math.floor((ts%3600)/60)}m` : ts >= 60 ? `${Math.floor(ts/60)}m ${ts%60}s` : `${ts}s`;
+                const cs = (ts / 3600) * PHOTOGRAPHER_HOURLY_RATE;
+                const csFormatted = cs >= 1 ? `$${cs.toFixed(0)}` : '$0';
+                const conf = (fs?.avgConf || stats.avgConfidence || 0.95) * 100;
+                return (<>
               <h2 className="text-3xl font-heading font-black mb-2">Sorting Complete!</h2>
-              <p className="text-white/40 text-sm mb-6">{stats.processed} images sorted into {Object.keys(stats.colorCounts).length} color folders</p>
+              <p className="text-white/40 text-sm mb-6">{p.toLocaleString()} images sorted into {Object.keys(cc).length} color folders</p>
 
-              {/* Big impact stats */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
                 <div className="bg-white/[0.03] rounded-xl p-4 border border-white/5">
-                  <div className="text-3xl font-heading font-black text-racing-500">{stats.processed.toLocaleString()}</div>
+                  <div className="text-3xl font-heading font-black text-racing-500">{p.toLocaleString()}</div>
                   <div className="text-[10px] text-white/30 mt-1 uppercase tracking-wider">Images Sorted</div>
                 </div>
                 <div className="bg-white/[0.03] rounded-xl p-4 border border-white/5">
-                  <div className="text-3xl font-heading font-black text-green-400">{timeSavedFormatted}</div>
+                  <div className="text-3xl font-heading font-black text-green-400">{tsFormatted}</div>
                   <div className="text-[10px] text-white/30 mt-1 uppercase tracking-wider">Time Saved</div>
                 </div>
                 <div className="bg-white/[0.03] rounded-xl p-4 border border-white/5">
-                  <div className="text-3xl font-heading font-black text-emerald-400">{costSavedFormatted}</div>
+                  <div className="text-3xl font-heading font-black text-emerald-400">{csFormatted}</div>
                   <div className="text-[10px] text-white/30 mt-1 uppercase tracking-wider">Cost Saved</div>
                 </div>
                 <div className="bg-white/[0.03] rounded-xl p-4 border border-white/5">
-                  <div className="text-3xl font-heading font-black text-purple-400">{stats.imagesPerSecond.toFixed(1)}</div>
+                  <div className="text-3xl font-heading font-black text-purple-400">{ips.toFixed(1)}</div>
                   <div className="text-[10px] text-white/30 mt-1 uppercase tracking-wider">Images/Sec</div>
                 </div>
               </div>
 
-              {/* Secondary stats */}
               <div className="flex items-center justify-center gap-6 text-xs text-white/30 border-t border-white/5 pt-4">
-                <span>{confPct.toFixed(0)}% accuracy</span>
+                <span>{conf.toFixed(0)}% accuracy</span>
                 <span>·</span>
-                <span>{Object.keys(stats.colorCounts).length} colors detected</span>
+                <span>{Object.keys(cc).length} colors detected</span>
                 <span>·</span>
-                <span>Manual estimate: ~{Math.ceil(stats.processed * 15 / 60)} min @ 15s/photo</span>
+                <span>Manual estimate: ~{Math.ceil(p * 15 / 60)} min @ 15s/photo</span>
               </div>
+              </>);
+              })()}
             </div>
 
             {/* Color cards */}
@@ -1192,13 +1212,8 @@ export default function SortPage() {
               <button
                 onClick={() => {
                   showToast('Building ZIP — this may take a moment for large batches...', 'info');
-                  // Use an anchor tag to trigger Electron's download handler
-                  const a = document.createElement('a');
-                  a.href = `${workerUrl}/download/${sessionId}`;
-                  a.download = `sorted_photos_${new Date().toISOString().slice(0,10)}.zip`;
-                  document.body.appendChild(a);
-                  a.click();
-                  document.body.removeChild(a);
+                  // Use window.open to trigger Electron's setWindowOpenHandler → downloadURL
+                  window.open(`${workerUrl}/download/${sessionId}`, '_blank');
                 }}
                 className="btn-racing btn-ripple px-10 py-4 rounded-2xl text-lg shadow-xl glow-red flex items-center gap-3 transition-transform hover:scale-[1.02] active:scale-[0.98]"
               >

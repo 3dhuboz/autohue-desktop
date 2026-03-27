@@ -250,11 +250,19 @@ class LicenseManager {
   /** Record processed images in history. */
   recordUsage(sessionId, imageCount, colorCounts) {
     try {
-      this.db.prepare(`
-        INSERT OR REPLACE INTO processing_history (session_id, image_count, color_counts, status)
-        VALUES (?, ?, ?, 'completed')
-      `).run(sessionId, imageCount, colorCounts ? JSON.stringify(colorCounts) : null);
-
+      // Try to update existing in_progress record first
+      const existing = this.db.prepare('SELECT id FROM processing_history WHERE session_id = ?').get(sessionId);
+      if (existing) {
+        this.db.prepare(`
+          UPDATE processing_history SET image_count = ?, color_counts = ?, status = 'completed', updated_at = datetime('now')
+          WHERE session_id = ?
+        `).run(imageCount, colorCounts ? JSON.stringify(colorCounts) : null, sessionId);
+      } else {
+        this.db.prepare(`
+          INSERT INTO processing_history (session_id, image_count, color_counts, status)
+          VALUES (?, ?, ?, 'completed')
+        `).run(sessionId, imageCount, colorCounts ? JSON.stringify(colorCounts) : null);
+      }
       return { success: true };
     } catch (err) {
       console.error('[license] Failed to record usage:', err.message);
