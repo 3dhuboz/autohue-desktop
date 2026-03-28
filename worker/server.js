@@ -663,14 +663,13 @@ const SEG_SIZE = 384; // 384 balances accuracy and speed (was 256, ~2x slower bu
 // Pre-allocate reusable input buffer (avoids 1.77MB allocation per image)
 let segInputBuffer = null;
 
+let modelsLoading = false;
 async function loadModel() {
-    // Skip model loading entirely when API vision is available (OpenRouter/Claude)
-    // Models are only needed for the local fallback pipeline
-    const engine = getActiveEngine();
-    if (engine !== 'local') {
-        console.log(`[models] Skipping ONNX model loading — using ${engine} vision API`);
-        return;
-    }
+    // Always defer model loading — load lazily when local pipeline is actually needed
+    // This makes the app start instantly for ALL users
+    if (modelsLoading) return;
+    modelsLoading = true;
+    console.log('[models] Loading ONNX models (local fallback pipeline)...');
 
     // Load SSD-MobileNet (bounding box detection) with timeout
     try {
@@ -1463,6 +1462,8 @@ async function analyzeImageColor(imagePath) {
         }
 
         // ═══ LOCAL PIPELINE: SSD-MobileNet + SegFormer + LAB (fallback) ═══
+        // Lazy-load ONNX models on first use
+        if (!onnxSession && !modelsLoading) await loadModel();
         const image = await Jimp.read(imagePath);
         const w = image.getWidth(), h = image.getHeight();
 
@@ -2862,7 +2863,8 @@ app.use('/output', express.static(OUTPUT_DIR));
 // ─── Start server immediately, load AI model in background ───
 app.listen(PORT, '127.0.0.1', () => {
     console.log(`Car Photo Color Sorter running at http://localhost:${PORT}`);
-    loadModel().then(() => {
-        console.log(`ONNX model: ${onnxSession ? 'loaded' : 'NOT loaded (fallback mode)'}`);
-    });
+    // Models load lazily on first local pipeline use — app starts instantly
+    console.log('[startup] Worker ready — ONNX models will load on demand');
+    // Notify parent process that worker is ready
+    if (process.send) process.send({ type: 'worker-ready' });
 });
