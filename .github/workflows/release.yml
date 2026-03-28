@@ -26,28 +26,19 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm run build
 
-      - name: Upload consistent download name
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          $version = (Get-Content package.json | ConvertFrom-Json).version
-          $src = "dist/AutoHue-Setup-$version.exe"
-          $dest = "dist/AutoHue-Setup-Latest.exe"
-          if (Test-Path $src) {
-            Copy-Item $src $dest
-            gh release upload "v$version" $dest --clobber
-          }
-        shell: pwsh
-
       - name: Upload to Cloudflare R2
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           $version = (Get-Content package.json | ConvertFrom-Json).version
-          $src = "dist/AutoHue-Setup-$version.exe"
+          $src = "dist/AutoHue Setup $version.exe"
           if (Test-Path $src) {
-            npx wrangler r2 object put "autohue-releases/AutoHue-Setup-$version.exe" --file $src
+            npx wrangler r2 object put "autohue-releases/AutoHue-Setup-$version.exe" --file "$src"
+            Write-Host "Uploaded AutoHue-Setup-$version.exe to R2"
+          } else {
+            Write-Host "WARNING: $src not found, skipping R2 upload"
+            Get-ChildItem dist/*.exe | ForEach-Object { Write-Host "  Found: $($_.Name)" }
           }
         shell: pwsh
 
@@ -77,6 +68,10 @@ jobs:
           DMG=$(find dist -name "*.dmg" | head -1)
           if [ -n "$DMG" ]; then
             npx wrangler r2 object put "autohue-releases/AutoHue-${VERSION}.dmg" --file "$DMG"
+            echo "Uploaded AutoHue-${VERSION}.dmg to R2"
+          else
+            echo "WARNING: No .dmg found, skipping R2 upload"
+            ls -la dist/ || true
           fi
 
   publish:
