@@ -552,12 +552,7 @@ export default function SortPage() {
                 if (entry) window.electronAPI.renameHistory?.(entry.id, batchName.trim());
               }).catch(() => {});
             }
-            // Auto-open output folder on completion (not cancellation)
-            if (data.status === 'completed') {
-              window.electronAPI.getUserDataPath?.().then(udp => {
-                window.electronAPI.openInExplorer?.(`${udp}/worker-data/output/${sid}`);
-              }).catch(() => {});
-            }
+            // Don't auto-open — let user decide via completion screen buttons
           }
         }
       } catch (e) {
@@ -932,13 +927,13 @@ export default function SortPage() {
 
         {/* ═══════ PROCESSING PHASE ═══════ */}
         {phase === 'processing' && (
-          <div className="animate-fade-up space-y-6">
-            <div className="text-center mb-4">
-              <h2 className="text-2xl font-heading font-black text-white flex items-center justify-center gap-3">
-                <FlagIcon size={24} className={`text-racing-500 ${paused ? '' : 'animate-pulse'}`} />
+          <div className="animate-fade-up space-y-3">
+            <div className="text-center mb-2">
+              <h2 className="text-xl font-heading font-black text-white flex items-center justify-center gap-2">
+                <FlagIcon size={20} className={`text-racing-500 ${paused ? '' : 'animate-pulse'}`} />
                 {paused ? 'Sorting Paused' : 'Sorting in Progress'}
               </h2>
-              <p className="text-white/30 text-sm mt-1">
+              <p className="text-white/25 text-xs mt-0.5">
                 {paused ? 'Processing is paused — you can navigate away safely' : 'AI is detecting cars and classifying colors'}
               </p>
               {(() => {
@@ -1126,7 +1121,7 @@ export default function SortPage() {
             )}
 
             {/* Gauges — hide when nothing classified yet (extraction/prep phase) */}
-            <div className={`glass-card rounded-3xl p-6 ${stats.processed === 0 && phase === 'processing' ? 'hidden' : ''}`}>
+            <div className={`glass-card rounded-2xl p-4 ${stats.processed === 0 && phase === 'processing' ? 'hidden' : ''}`}>
               <div className="grid grid-cols-3 lg:grid-cols-6 gap-4 items-start">
                 <TachoGauge value={speedPct} max={10} label="SPEED" unit="img/sec" displayValue={stats.imagesPerSecond.toFixed(1)} size={150} variant="red" redZoneStart={80} subtitle={stats.imagesPerSecond > 0 ? `~${(1/stats.imagesPerSecond).toFixed(1)}s each` : ''} />
                 <TachoGauge value={progressPct} max={100} label="PROGRESS" unit={`${stats.processed}/${stats.total}`} displayValue={`${progressPct}%`} size={150} variant="amber" redZoneStart={90} />
@@ -1138,7 +1133,7 @@ export default function SortPage() {
             </div>
 
             {/* Progress bar */}
-            <div className="glass-card rounded-2xl p-5 space-y-3">
+            <div className="glass-card rounded-2xl p-3 space-y-2">
               <div className="flex items-center justify-between text-sm">
                 <span className="text-white/50 flex items-center gap-2">
                   {!paused && <SpinnerIcon size={14} className="text-racing-500" />}
@@ -1172,7 +1167,7 @@ export default function SortPage() {
             </div>
 
             {/* Sorting Animation */}
-            <div className="glass-card rounded-2xl p-5 overflow-hidden">
+            <div className="glass-card rounded-2xl p-3 overflow-hidden">
               <SortAnimation
                 results={stats.results.map(r => ({
                   filename: r.file || r.filename || '',
@@ -1186,43 +1181,54 @@ export default function SortPage() {
             </div>
 
             {/* Pipeline visualization */}
-            <div className="glass-card rounded-2xl p-5 relative overflow-hidden">
-              <h3 className="text-xs font-bold text-white/30 mb-4 flex items-center gap-2">
-                <BrainIcon size={14} className="text-racing-500" /> AI Classification Pipeline
-              </h3>
+            <div className="glass-card rounded-2xl p-4 relative overflow-hidden">
+              <style>{`
+                @keyframes pipeline-flow { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+                .pipe-flow { background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.08) 50%, transparent 100%); background-size: 200% 100%; animation: pipeline-flow 1.5s linear infinite; }
+              `}</style>
               <div className="flex items-center justify-between gap-1 relative">
                 {pipelineSteps.map((step, i) => (
                   <div key={i} className="flex items-center flex-1">
-                    {/* Connector arrow */}
+                    {/* Animated connector */}
                     {i > 0 && (
-                      <svg viewBox="0 0 24 12" className="w-6 h-3 shrink-0 -mx-0.5" fill="none">
-                        <line x1="0" y1="6" x2="18" y2="6" stroke={step.active ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.06)'} strokeWidth="1.5" />
-                        <path d="M16 2L22 6L16 10" stroke={step.active ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.06)'} strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
+                      <div className="relative w-8 h-[2px] shrink-0 -mx-1">
+                        <div className={`absolute inset-0 rounded-full ${step.active ? 'bg-white/10' : 'bg-white/5'}`} />
+                        {step.active && !step.done && <div className="absolute inset-0 rounded-full pipe-flow" />}
+                      </div>
                     )}
                     {/* Step node */}
-                    <div className="flex flex-col items-center gap-1.5 flex-1">
+                    <div className="flex flex-col items-center gap-1 flex-1">
                       <div className="relative">
                         <div
-                          className={`w-12 h-12 rounded-xl flex items-center justify-center transition-all duration-500 border ${
+                          className={`w-11 h-11 rounded-xl flex items-center justify-center transition-all duration-500 border ${
                             step.active
-                              ? `${step.bgActive} ${step.borderActive} ${!step.done ? 'animate-pulse' : ''}`
-                              : 'bg-white/5 border-white/10'
+                              ? `${step.bgActive} ${step.borderActive} ${!step.done ? '' : ''}`
+                              : 'bg-white/[0.03] border-white/[0.06]'
                           }`}
+                          style={step.active && !step.done ? { boxShadow: `0 0 12px ${step.textActive === 'text-red-400' ? 'rgba(239,68,68,0.15)' : step.textActive === 'text-blue-400' ? 'rgba(59,130,246,0.15)' : step.textActive === 'text-purple-400' ? 'rgba(168,85,247,0.15)' : step.textActive === 'text-amber-400' ? 'rgba(245,158,11,0.15)' : step.textActive === 'text-green-400' ? 'rgba(34,197,94,0.15)' : 'none'}` } : {}}
                         >
-                          <span className={step.active ? step.textActive : 'text-white/20'}>
-                            {step.done ? <CheckIcon size={18} /> : step.icon}
+                          <span className={step.active ? step.textActive : 'text-white/15'}>
+                            {step.done ? <CheckIcon size={16} /> : step.icon}
                           </span>
                         </div>
-                        <span className={`absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full text-[8px] font-bold flex items-center justify-center ${
-                          step.active ? 'bg-white/10 text-white/50' : 'bg-white/5 text-white/15'
+                        <span className={`absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full text-[7px] font-bold flex items-center justify-center ${
+                          step.active ? 'bg-white/10 text-white/50' : 'bg-white/[0.03] text-white/10'
                         }`}>{i + 1}</span>
                       </div>
-                      <span className="text-[9px] text-white/30">{step.label}</span>
-                      {step.sub && <span className="text-[8px] text-white/20">{step.sub}</span>}
+                      <span className={`text-[8px] font-semibold ${step.active ? 'text-white/50' : 'text-white/20'}`}>{step.label}</span>
+                      {step.sub && <span className={`text-[7px] ${step.active ? 'text-white/30' : 'text-white/10'}`}>{step.sub}</span>}
                     </div>
                   </div>
                 ))}
+              </div>
+              {/* Pipeline description */}
+              <div className="mt-3 pt-3 border-t border-white/[0.04] flex items-center justify-between">
+                <span className="text-[9px] text-white/20">
+                  {stats.processed > 0 ? `${stats.processed} classified · ${Object.keys(stats.colorCounts).length} colors detected` : 'Waiting for classification results...'}
+                </span>
+                <span className="text-[9px] text-white/15">
+                  {stats.imagesPerSecond > 0 ? `${stats.imagesPerSecond.toFixed(1)} img/s` : ''}
+                </span>
               </div>
             </div>
 
