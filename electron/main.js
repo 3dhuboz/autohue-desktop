@@ -123,7 +123,7 @@ function downloadAndInstallUpdate(version, platform) {
         // Launch installer then relaunch app via a helper batch script
         setTimeout(() => {
           const fs = require('fs');
-          const exePath = path.join(process.env.LOCALAPPDATA || '', 'Programs', 'autohue', 'AutoHue.exe');
+          const exePath = path.join(process.env.LOCALAPPDATA || '', 'Programs', 'autohue-desktop', 'AutoHue.exe');
           const batPath = path.join(app.getPath('temp'), 'autohue-update.bat');
           // Batch script: wait for installer, then launch app
           fs.writeFileSync(batPath, [
