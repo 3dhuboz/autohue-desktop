@@ -93,11 +93,35 @@ function getNextKey() {
     return bestKey;
 }
 
-function markKeyRateLimited(key) {
-    // Back off this key for 10 seconds
-    keyBackoff.set(key, Date.now() + 10000);
+const keyFailCount = new Map(); // key → consecutive fail count
+
+function markKeyRateLimited(key, statusCode) {
+    const fails = (keyFailCount.get(key) || 0) + 1;
+    keyFailCount.set(key, fails);
+
+    // Escalating backoff: 10s → 30s → 60s → 5min → permanently disabled
+    let backoffMs;
+    if (statusCode === 402 || statusCode === 403) {
+        // Payment required or forbidden = credits exhausted, disable for 1 hour
+        backoffMs = 3600000;
+        console.log(`[openrouter] Key ...${key.slice(-6)} credits exhausted (${statusCode}), disabled for 1hr`);
+    } else if (fails >= 5) {
+        // 5+ consecutive fails = probably dead key, disable for 10 minutes
+        backoffMs = 600000;
+        console.log(`[openrouter] Key ...${key.slice(-6)} failed ${fails}x, disabled for 10min`);
+    } else {
+        // Rate limit — escalating backoff
+        backoffMs = Math.min(10000 * Math.pow(2, fails - 1), 120000);
+        console.log(`[openrouter] Key ...${key.slice(-6)} rate-limited (fail #${fails}), backoff ${Math.round(backoffMs/1000)}s`);
+    }
+
+    keyBackoff.set(key, Date.now() + backoffMs);
     const available = OPENROUTER_KEYS.filter(k => (keyBackoff.get(k) || 0) <= Date.now()).length;
-    console.log(`[openrouter] Key ...${key.slice(-6)} rate-limited, ${available}/${OPENROUTER_KEYS.length} keys available`);
+    console.log(`[openrouter] ${available}/${OPENROUTER_KEYS.length} keys available`);
+}
+
+function markKeySuccess(key) {
+    keyFailCount.set(key, 0); // Reset fail count on success
 }
 
 // Legacy: also check claude keyfile for backward compat
@@ -404,14 +428,13 @@ async function classifyMiniBatch(imageBuffers, retries = 3) {
         });
 
         if (!res.ok) {
-            if (res.status === 429) {
-                markKeyRateLimited(apiKey);
-                if (attempt < retries - 1) continue; // try next key immediately
-            }
+            markKeyRateLimited(apiKey, res.status);
+            if (res.status === 429 && attempt < retries - 1) continue;
             console.warn(`[vision] Mini-batch failed (${res.status}), trying individually`);
             return Promise.all(imageBuffers.map(buf => classifySingleImage(buf).catch(() => null)));
         }
 
+        markKeySuccess(apiKey);
         const data = await res.json();
         const rawText = (data.choices?.[0]?.message?.content || '').trim();
         const results = parseColorLines(rawText, imageBuffers.length);
@@ -467,15 +490,13 @@ async function classifySingleImage(imageBuffer, retries = 3) {
 
         if (!res.ok) {
             const errText = await res.text().catch(() => '');
-            // Rate limited — mark key and try next immediately
-            if (res.status === 429) {
-                markKeyRateLimited(apiKey);
-                if (attempt < retries - 1) continue; // try next key
-            }
+            markKeyRateLimited(apiKey, res.status);
+            if (res.status === 429 && attempt < retries - 1) continue; // try next key
             console.error(`[vision] API ${res.status}: ${errText.slice(0, 100)}`);
             return null;
         }
 
+        markKeySuccess(apiKey);
         const data = await res.json();
         const rawText = (data.choices?.[0]?.message?.content || '').trim().toLowerCase();
 
