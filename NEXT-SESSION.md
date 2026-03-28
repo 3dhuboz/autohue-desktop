@@ -1,47 +1,77 @@
-# AutoHue — Next Session (v3.3.5)
+# AutoHue — Next Session: STABILIZATION (v3.4.0)
 
-## Completed (this session — v3.3.3 → v3.3.4)
-1. **Vehicle type sorting UI** — Checkboxes on SortPage for "Sort by vehicle type" (cars/bikes/people) and "Detect feature shots" (wheelstands, flames, burnouts). Settings persist via SQLite.
-2. **Stream animation** — Replaced one-at-a-time animation with continuous flowing stream of color dots. Scales with throughput, shows img/s speed, no more "WAITING" stalls.
-3. **Admin dashboard deployed** — `autohue-admin.pages.dev` (Cloudflare Pages). Clerk auth, customer/license/payment management.
-4. **PayPal plans created** — 6 live subscription plans (3 tiers × monthly/yearly). Env vars set on autohue-site.
-5. **GitHub secrets** — CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_API_TOKEN set for CI.
-6. **Admin API redeployed** — R2 binding active, download endpoints live.
-7. **Auto-update working** — GitHub Releases with latest.yml + blockmap for electron-updater.
+## CRITICAL: Do NOT add features. Fix bugs first.
 
-## Still TODO
-1. **Mac build** — Need macOS runner or cross-compile for .dmg
-2. **Code signing** — Windows SmartScreen warning without certificate
-3. **Test PayPal checkout flow end-to-end** — Verify subscription creates customer + sends license key email
-4. **Webhook setup** — Ensure PayPal webhook URL points to `/api/paypal-webhook`
-5. **Custom domain for admin** — Optional: `admin.autohue.app` instead of `autohue-admin.pages.dev`
+## Root Causes Identified
+1. **Worker crashes mid-sort (OOM)** — Jimp loads multiple high-res images concurrently for batch classification. With BATCH_CONCURRENCY=5 and large ZIPs (1000+ images), memory spikes and kills the worker process. Worker auto-restarts but session state is lost.
+2. **Obfuscation destroys the app** — javascript-obfuscator produces 8MB+ files that infinite-loop. NEVER run `node scripts/obfuscate-electron.js`. Remove it from build pipeline. Code is in a private repo — obfuscation not needed.
+3. **Worker only loads 1 OpenRouter key** — Despite 5 keys in `.openrouter-keys` file and env var `OPENROUTER_KEY=key1,key2,...`, the debug log shows "1 keys". The comma-split key loading works in isolation but something in the bundled worker differs.
 
-## Architecture
-- Worker: worker/server.js (bundled via esbuild)
-- Renderer: React + Vite, polls /status/:sessionId every 1.5s
-- Electron main: electron/main.js
-- License: electron/license.js (sql.js WASM)
-- 5 API keys at: %APPDATA%/autohue-desktop/worker-data/.openrouter-keys
-- Model: google/gemini-2.0-flash-001
-- Downloads: R2 bucket `autohue-releases` served via admin API
-- CI: GitHub Actions on tag push → build → GitHub Release + R2 upload
-- Admin: autohue-admin.pages.dev (React + Clerk + Cloudflare Pages)
+## Bugs to Fix (in order)
+
+### P0: Worker crash / classification failure
+- Add memory limit: process images 1 at a time with serial fallback when memory is low
+- Add `--max-old-space-size=4096` to worker fork options
+- Reduce BATCH_CONCURRENCY to 2 (not 5)
+- Add try/catch around every Jimp.read() with explicit error logging
+- Log worker crash reason: capture `process.on('exit')` code and write to debug log
+
+### P1: Key loading
+- Debug why 5 keys become 1 in the worker — add explicit logging of OPENROUTER_KEY env var length and split results
+- Verify the comma-separated env var works in forked child process
+
+### P2: UI fixes
+- Health endpoint: report "ready" when API keys are set even if ONNX models not loaded
+- Stream animation: verify it works (never tested in production)
+- Extraction animation: hide when paused (code fixed, needs rebuild)
+- "Starting..." label in animation: should show actual classification progress
+
+### P3: Website
+- CF Pages autohue-site: change build command to `npx next build`, output to `.next`
+- Verify pricing shows $24/$99/$249 after deploy
+- Remove "Buy Credits" section (not implemented yet)
+
+## Build Process (CORRECT ORDER)
+```bash
+cd autohue-desktop
+
+# 1. Build renderer
+npx vite build renderer
+
+# 2. Build worker bundle
+node scripts/build-worker.js
+
+# 3. DO NOT RUN obfuscate-electron.js
+
+# 4. Build installer
+CSC_IDENTITY_AUTO_DISCOVERY=false npx electron-builder --win nsis
+
+# 5. Verify clean electron files in build
+npx asar list dist/win-unpacked/resources/app.asar | grep electron/
+# Should show: main.js, preload.js, worker-manager.js, license.js, database.js, rules-sync.js
+# Each should be <20KB, NOT 8MB
+
+# 6. Test locally before deploying
+# Run dist/win-unpacked/AutoHue.exe and verify it opens + sorts
+```
+
+## Architecture Reference
+- Desktop: github.com/3dhuboz/autohue-desktop (private)
+- Admin: github.com/3dhuboz/autohue-admin (private)
+- Website: github.com/3dhuboz/autohue-site (private)
 - API: autohue-api.steve-700.workers.dev (Hono + D1 + R2)
+- Admin UI: autohue-admin.pages.dev
+- Website: autohue.app (CF Pages, connected to autohue-site repo)
+- R2: autohue-releases bucket
+- 5 OpenRouter keys in DB (openrouter_api_keys JSON array)
+- Claude Vision key in DB (claude_api_key)
+- Model: google/gemini-2.0-flash-001
 
-## Color Categories (14 total)
-red, blue, green, yellow, orange, purple, pink, brown, black, white, silver-grey, cream, please-double-check
-
-## Vehicle Types (when enabled)
-car → cars/, motorcycle → bikes/, person → people/, truck → trucks/, other → other/
-
-## Feature Shots (when enabled)
-Copied to _highlights/{feature}/ — wheelstand, flames, burnout, drift, launch, crash
-
-## Pricing (yearly / monthly)
-- Trial: Free (7 days, 50/day)
-- Hobbyist: $19/$24 per month (300/day)
-- Pro: $79/$99 per month (2,000/day) — Most Popular
-- Unlimited: $199/$249 per month (10,000/day)
+## Pricing
+- Trial: Free (50/day, 7 days)
+- Hobbyist: $19/$24/mo (300/day)
+- Pro: $79/$99/mo (2,000/day)
+- Unlimited: $199/$249/mo (10,000/day)
 
 ## PayPal Plan IDs
 - Hobbyist Monthly: P-0E0766276B1139608NHDRU3Y
