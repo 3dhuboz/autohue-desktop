@@ -1,6 +1,5 @@
 import { useEffect, useRef, useCallback } from 'react';
 
-// ── Types ──
 interface SortResult {
   filename: string;
   color: string;
@@ -14,7 +13,6 @@ interface SortAnimationProps {
   totalImages?: number;
 }
 
-// ── Color lookup ──
 const COLOR_HEX: Record<string, string> = {
   red: '#ef4444', blue: '#3b82f6', green: '#22c55e', yellow: '#eab308',
   orange: '#f97316', purple: '#a855f7', pink: '#ec4899', brown: '#a16207',
@@ -22,35 +20,27 @@ const COLOR_HEX: Record<string, string> = {
   gold: '#d97706', unknown: '#f87171', 'please-double-check': '#f59e0b',
 };
 
-// Particle in the stream
 interface Particle {
   id: number;
   color: string;
   hex: string;
   filename: string;
-  x: number;
-  y: number;
-  targetX: number;
-  targetY: number;
-  size: number;
+  progress: number; // 0 (source) → 1 (bucket)
   opacity: number;
-  phase: 'enter' | 'travel' | 'sort' | 'done';
   bucketIdx: number;
   speed: number;
-  trail: { x: number; y: number }[];
   img: HTMLImageElement | null;
+  landed: boolean;
 }
 
-// Bucket accumulator
 interface Bucket {
   color: string;
   hex: string;
   count: number;
-  flashTimer: number;
+  flash: number;
 }
 
-const MAX_PARTICLES = 35;
-const BUCKET_COLORS = ['red', 'blue', 'green', 'yellow', 'orange', 'purple', 'pink', 'brown', 'black', 'white', 'silver-grey', 'cream'];
+const MAX_PARTICLES = 30;
 
 export default function SortAnimation({ results, isProcessing, totalProcessed, totalImages }: SortAnimationProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -59,20 +49,33 @@ export default function SortAnimation({ results, isProcessing, totalProcessed, t
     buckets: new Map<string, Bucket>(),
     processedCount: 0,
     nextId: 0,
-    pendingQueue: [] as SortResult[],
-    spawnAccum: 0,
+    pending: [] as SortResult[],
     lastTime: 0,
     animId: 0,
+    spawnTimer: 0,
+    engineAngle: 0,
+    pulsePhase: 0,
   });
 
   // Enqueue new results
   useEffect(() => {
     const s = stateRef.current;
     if (results.length > s.processedCount) {
-      const newItems = results.slice(s.processedCount);
+      s.pending.push(...results.slice(s.processedCount));
       s.processedCount = results.length;
-      s.pendingQueue.push(...newItems);
     }
+  }, [results]);
+
+  // Sync bucket counts
+  useEffect(() => {
+    const s = stateRef.current;
+    const counts = new Map<string, number>();
+    results.forEach(r => counts.set(r.color, (counts.get(r.color) || 0) + 1));
+    counts.forEach((count, color) => {
+      const hex = COLOR_HEX[color] || '#94a3b8';
+      if (!s.buckets.has(color)) s.buckets.set(color, { color, hex, count, flash: 0 });
+      else s.buckets.get(color)!.count = count;
+    });
   }, [results]);
 
   const render = useCallback(() => {
@@ -83,10 +86,7 @@ export default function SortAnimation({ results, isProcessing, totalProcessed, t
 
     const dpr = window.devicePixelRatio || 1;
     const rect = canvas.getBoundingClientRect();
-    const W = rect.width;
-    const H = rect.height;
-
-    // Resize canvas if needed
+    const W = rect.width, H = rect.height;
     if (canvas.width !== W * dpr || canvas.height !== H * dpr) {
       canvas.width = W * dpr;
       canvas.height = H * dpr;
@@ -95,367 +95,234 @@ export default function SortAnimation({ results, isProcessing, totalProcessed, t
 
     const s = stateRef.current;
     const now = performance.now();
-    const dt = Math.min(now - (s.lastTime || now), 33); // cap at ~30fps delta
+    const dt = Math.min(now - (s.lastTime || now), 32);
     s.lastTime = now;
+    s.engineAngle += dt * 0.003;
+    s.pulsePhase += dt * 0.004;
 
-    // ── Layout ──
-    const funnelX = W * 0.08;      // left: source
-    const engineX = W * 0.42;      // center: AI engine
-    const bucketStartX = W * 0.65; // right: color buckets
-    const centerY = H * 0.45;
-    const bucketW = 28;
-    const bucketH = 20;
-
-    // Active buckets (only those with results)
+    // Layout
+    const srcX = W * 0.06, engineX = W * 0.38, bucketStartX = W * 0.62;
+    const midY = H * 0.45;
     const activeBuckets = Array.from(s.buckets.values()).sort((a, b) => b.count - a.count);
-    const bucketSpacing = Math.min(32, (H - 20) / Math.max(activeBuckets.length, 1));
+    const bSpacing = Math.min(28, (H - 16) / Math.max(activeBuckets.length, 1));
 
-    // ── Spawn particles from queue ──
-    const spawnRate = s.pendingQueue.length > 30 ? 16 : s.pendingQueue.length > 10 ? 30 : 50;
-    s.spawnAccum += dt;
-    while (s.spawnAccum >= spawnRate && s.pendingQueue.length > 0 && s.particles.length < MAX_PARTICLES) {
-      s.spawnAccum -= spawnRate;
-      const item = s.pendingQueue.shift()!;
+    // ── Spawn ──
+    const spawnRate = s.pending.length > 20 ? 40 : s.pending.length > 5 ? 80 : 140;
+    s.spawnTimer += dt;
+    while (s.spawnTimer >= spawnRate && s.pending.length > 0 && s.particles.length < MAX_PARTICLES) {
+      s.spawnTimer -= spawnRate;
+      const item = s.pending.shift()!;
       const hex = COLOR_HEX[item.color] || '#94a3b8';
-
-      // Ensure bucket exists
-      if (!s.buckets.has(item.color)) {
-        s.buckets.set(item.color, { color: item.color, hex, count: 0, flashTimer: 0 });
-      }
-      const bucket = s.buckets.get(item.color)!;
-      const bucketIdx = activeBuckets.indexOf(bucket);
-
-      // Load thumbnail if available
+      if (!s.buckets.has(item.color)) s.buckets.set(item.color, { color: item.color, hex, count: 0, flash: 0 });
+      const bIdx = activeBuckets.findIndex(b => b.color === item.color);
       let img: HTMLImageElement | null = null;
-      if (item.thumb) {
-        img = new Image();
-        img.crossOrigin = 'anonymous';
-        img.src = item.thumb;
-      }
-
+      if (item.thumb) { img = new Image(); img.crossOrigin = 'anonymous'; img.src = item.thumb; }
       s.particles.push({
-        id: s.nextId++,
-        color: item.color,
-        hex,
-        filename: item.filename,
-        x: funnelX - 10,
-        y: centerY + (Math.random() - 0.5) * 16,
-        targetX: 0,
-        targetY: 0,
-        size: 18 + Math.random() * 6,
-        opacity: 0,
-        phase: 'enter',
-        bucketIdx: Math.max(0, bucketIdx),
-        speed: 0.15 + Math.random() * 0.1,
-        trail: [],
-        img,
+        id: s.nextId++, color: item.color, hex, filename: item.filename,
+        progress: 0, opacity: 0, bucketIdx: Math.max(0, bIdx),
+        speed: 0.0008 + Math.random() * 0.0004, img, landed: false,
       });
     }
 
     // ── Clear ──
     ctx.clearRect(0, 0, W, H);
 
-    // ── Draw track line ──
-    const grad = ctx.createLinearGradient(funnelX, 0, engineX, 0);
-    grad.addColorStop(0, 'rgba(220,38,38,0.08)');
-    grad.addColorStop(1, 'rgba(220,38,38,0.03)');
-    ctx.strokeStyle = grad;
+    // ── Track ──
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,255,255,0.03)';
     ctx.lineWidth = 1;
-    ctx.setLineDash([3, 6]);
+    ctx.setLineDash([2, 6]);
     ctx.beginPath();
-    ctx.moveTo(funnelX + 10, centerY);
-    ctx.lineTo(engineX - 18, centerY);
+    ctx.moveTo(srcX + 16, midY);
+    ctx.lineTo(engineX - 16, midY);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(engineX + 16, midY);
+    ctx.lineTo(bucketStartX - 8, midY);
     ctx.stroke();
     ctx.setLineDash([]);
+    ctx.restore();
 
-    // ── Draw source stack icon ──
-    ctx.fillStyle = 'rgba(255,255,255,0.06)';
-    ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+    // ── Source icon ──
+    ctx.fillStyle = 'rgba(255,255,255,0.04)';
+    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
     ctx.lineWidth = 1;
-    const srcSize = 22;
-    roundRect(ctx, funnelX - srcSize / 2, centerY - srcSize / 2, srcSize, srcSize, 4);
-    ctx.fill();
-    ctx.stroke();
-    // Image icon inside
-    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
-    ctx.lineWidth = 0.8;
-    ctx.beginPath();
-    ctx.moveTo(funnelX - 6, centerY + 4);
-    ctx.lineTo(funnelX - 2, centerY);
-    ctx.lineTo(funnelX + 2, centerY + 3);
-    ctx.lineTo(funnelX + 6, centerY - 2);
-    ctx.stroke();
-
-    // Remaining count
-    const remaining = Math.max(0, (totalImages || 0) - (totalProcessed || 0));
+    rr(ctx, srcX - 11, midY - 11, 22, 22, 4); ctx.fill(); ctx.stroke();
     ctx.fillStyle = 'rgba(249,115,22,0.7)';
-    ctx.font = '600 10px "Space Grotesk", sans-serif';
+    ctx.font = '600 9px "Space Grotesk"';
     ctx.textAlign = 'center';
-    ctx.fillText(String(remaining), funnelX, centerY + srcSize / 2 + 14);
-    ctx.fillStyle = 'rgba(255,255,255,0.15)';
-    ctx.font = '500 7px "Outfit", sans-serif';
-    ctx.fillText('QUEUE', funnelX, centerY + srcSize / 2 + 23);
+    const rem = Math.max(0, (totalImages || 0) - (totalProcessed || 0));
+    ctx.fillText(String(rem), srcX, midY + 24);
+    ctx.fillStyle = 'rgba(255,255,255,0.12)';
+    ctx.font = '500 6px "Outfit"';
+    ctx.fillText('QUEUE', srcX, midY + 32);
 
-    // ── Draw AI Engine core ──
-    const engineR = 18;
-    const spinAngle = (now / 800) % (Math.PI * 2);
+    // ── Engine ──
     ctx.save();
-    ctx.translate(engineX, centerY);
-
-    // Glow
-    if (isProcessing && s.particles.length > 0) {
-      const lastHex = s.particles[s.particles.length - 1]?.hex || '#dc2626';
-      const glow = ctx.createRadialGradient(0, 0, 0, 0, 0, engineR * 2);
-      glow.addColorStop(0, lastHex + '18');
-      glow.addColorStop(1, 'transparent');
-      ctx.fillStyle = glow;
-      ctx.fillRect(-engineR * 2, -engineR * 2, engineR * 4, engineR * 4);
-    }
-
-    // Ring
+    ctx.translate(engineX, midY);
+    // Ambient glow
+    const glow = ctx.createRadialGradient(0, 0, 0, 0, 0, 28);
+    const pulseAlpha = 0.04 + Math.sin(s.pulsePhase) * 0.02;
+    glow.addColorStop(0, `rgba(220,38,38,${pulseAlpha})`);
+    glow.addColorStop(1, 'transparent');
+    ctx.fillStyle = glow;
+    ctx.fillRect(-28, -28, 56, 56);
+    // Core
     ctx.beginPath();
-    ctx.arc(0, 0, engineR, 0, Math.PI * 2);
+    ctx.arc(0, 0, 16, 0, Math.PI * 2);
     ctx.fillStyle = 'rgba(22,22,42,0.9)';
     ctx.fill();
-    ctx.strokeStyle = 'rgba(220,38,38,0.2)';
-    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = 'rgba(220,38,38,0.15)';
+    ctx.lineWidth = 1;
     ctx.stroke();
-
-    // Spinning color arcs
-    const arcColors = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#a855f7'];
-    arcColors.forEach((c, i) => {
-      const startA = spinAngle + (i * Math.PI * 2) / 6;
-      const endA = startA + Math.PI / 4;
+    // Spinning arcs
+    const arcC = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#a855f7'];
+    arcC.forEach((c, i) => {
+      const a = s.engineAngle + (i * Math.PI * 2) / 6;
       ctx.beginPath();
-      ctx.arc(0, 0, engineR - 4, startA, endA);
-      ctx.strokeStyle = c + '99';
+      ctx.arc(0, 0, 12, a, a + 0.7);
+      ctx.strokeStyle = c + '88';
       ctx.lineWidth = 2;
       ctx.stroke();
     });
-
-    // Center dot
     ctx.beginPath();
-    ctx.arc(0, 0, 2.5, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.arc(0, 0, 2, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.8)';
     ctx.fill();
-
     ctx.restore();
-
     // Engine label
-    ctx.fillStyle = isProcessing ? 'rgba(34,197,94,0.5)' : 'rgba(255,255,255,0.15)';
-    ctx.font = '600 8px "Space Grotesk", sans-serif';
+    ctx.fillStyle = isProcessing ? 'rgba(34,197,94,0.45)' : 'rgba(255,255,255,0.12)';
+    ctx.font = '600 7px "Space Grotesk"';
     ctx.textAlign = 'center';
-    ctx.fillText(isProcessing ? 'CLASSIFYING' : 'AI ENGINE', engineX, centerY + engineR + 14);
+    ctx.fillText(isProcessing ? 'CLASSIFYING' : 'AI ENGINE', engineX, midY + 28);
 
-    // ── Draw buckets ──
-    const bucketListStartY = 10;
-    activeBuckets.forEach((bucket, i) => {
-      const bx = bucketStartX;
-      const by = bucketListStartY + i * bucketSpacing;
-
-      // Flash effect
-      bucket.flashTimer = Math.max(0, bucket.flashTimer - dt / 300);
-      const flash = bucket.flashTimer;
-
-      // Bucket rectangle
-      ctx.fillStyle = bucket.hex + (flash > 0 ? '40' : '18');
-      ctx.strokeStyle = bucket.hex + (flash > 0 ? '80' : '30');
-      ctx.lineWidth = flash > 0 ? 1.5 : 0.8;
-      roundRect(ctx, bx, by, bucketW, bucketH, 3);
-      ctx.fill();
-      ctx.stroke();
-
-      // Color dot
+    // ── Buckets ──
+    const bListY = 8;
+    activeBuckets.forEach((b, i) => {
+      const bx = bucketStartX, by = bListY + i * bSpacing;
+      b.flash = Math.max(0, b.flash - dt / 250);
+      ctx.fillStyle = b.hex + (b.flash > 0 ? '35' : '12');
+      ctx.strokeStyle = b.hex + (b.flash > 0 ? '70' : '25');
+      ctx.lineWidth = b.flash > 0 ? 1.5 : 0.7;
+      rr(ctx, bx, by, 24, 18, 3); ctx.fill(); ctx.stroke();
       ctx.beginPath();
-      ctx.arc(bx + 8, by + bucketH / 2, 4, 0, Math.PI * 2);
-      ctx.fillStyle = bucket.hex;
+      ctx.arc(bx + 7, by + 9, 3.5, 0, Math.PI * 2);
+      ctx.fillStyle = b.hex;
       ctx.fill();
-
-      // Count
-      ctx.fillStyle = 'rgba(255,255,255,0.5)';
-      ctx.font = '600 9px "JetBrains Mono", monospace';
+      ctx.fillStyle = 'rgba(255,255,255,0.45)';
+      ctx.font = '600 8px "JetBrains Mono"';
       ctx.textAlign = 'left';
-      ctx.fillText(String(bucket.count), bx + bucketW + 6, by + bucketH / 2 + 3);
-
-      // Color label
-      ctx.fillStyle = 'rgba(255,255,255,0.2)';
-      ctx.font = '400 7px "Outfit", sans-serif';
-      const label = bucket.color === 'silver-grey' ? 'Silver' : bucket.color === 'please-double-check' ? 'Review' : bucket.color.charAt(0).toUpperCase() + bucket.color.slice(1);
-      ctx.fillText(label, bx + bucketW + 30, by + bucketH / 2 + 3);
+      ctx.fillText(String(b.count), bx + 28, by + 12);
+      ctx.fillStyle = 'rgba(255,255,255,0.18)';
+      ctx.font = '400 6px "Outfit"';
+      const lbl = b.color === 'silver-grey' ? 'Silver' : b.color === 'please-double-check' ? 'Review' : b.color.charAt(0).toUpperCase() + b.color.slice(1);
+      ctx.fillText(lbl, bx + 48, by + 12);
     });
-
-    // Sorted count
-    ctx.fillStyle = 'rgba(34,197,94,0.7)';
-    ctx.font = '700 11px "Space Grotesk", sans-serif';
+    // Sorted total
+    ctx.fillStyle = 'rgba(34,197,94,0.6)';
+    ctx.font = '700 10px "Space Grotesk"';
     ctx.textAlign = 'left';
-    ctx.fillText(String(totalProcessed ?? 0), bucketStartX, H - 8);
-    ctx.fillStyle = 'rgba(255,255,255,0.15)';
-    ctx.font = '500 7px "Outfit", sans-serif';
-    ctx.fillText('SORTED', bucketStartX + 36, H - 8);
+    ctx.fillText(String(totalProcessed ?? 0), bucketStartX, H - 6);
+    ctx.fillStyle = 'rgba(255,255,255,0.12)';
+    ctx.font = '500 6px "Outfit"';
+    ctx.fillText('SORTED', bucketStartX + 32, H - 6);
 
-    // ── Update & draw particles ──
+    // ── Particles ──
     const toRemove: number[] = [];
-
     for (let i = 0; i < s.particles.length; i++) {
       const p = s.particles[i];
-      const spd = p.speed * dt;
+      p.progress += p.speed * dt;
+      p.opacity = p.progress < 0.05 ? p.progress / 0.05
+        : p.progress > 0.9 ? Math.max(0, (1 - p.progress) / 0.1)
+        : 1;
 
-      // Store trail
-      p.trail.push({ x: p.x, y: p.y });
-      if (p.trail.length > 6) p.trail.shift();
+      if (p.progress >= 1 && !p.landed) {
+        p.landed = true;
+        const bucket = s.buckets.get(p.color);
+        if (bucket) { bucket.count++; bucket.flash = 1; }
+      }
+      if (p.progress >= 1.1) { toRemove.push(i); continue; }
 
-      switch (p.phase) {
-        case 'enter':
-          p.opacity = Math.min(1, p.opacity + 0.06);
-          p.x += spd * 1.8;
-          if (p.x >= engineX - engineR - 4) {
-            p.phase = 'travel';
-          }
-          break;
+      // Position: cubic bezier path from source → engine → bucket
+      const freshBuckets = activeBuckets;
+      const bIdx = Math.min(p.bucketIdx, freshBuckets.length - 1);
+      const targetY = bListY + Math.max(0, bIdx) * bSpacing + 9;
+      let px: number, py: number;
 
-        case 'travel':
-          // Pulse through the engine
-          p.x += spd * 1.2;
-          p.size = p.x < engineX ? p.size * 1.003 : p.size * 0.997;
-          if (p.x >= engineX + engineR + 4) {
-            p.phase = 'sort';
-            // Recompute bucket position (it may have shifted)
-            const freshBuckets = Array.from(s.buckets.values()).sort((a, b) => b.count - a.count);
-            const bIdx = freshBuckets.findIndex(b => b.color === p.color);
-            p.bucketIdx = Math.max(0, bIdx);
-            p.targetX = bucketStartX + 4;
-            p.targetY = bucketListStartY + p.bucketIdx * bucketSpacing + bucketH / 2;
-          }
-          break;
-
-        case 'sort':
-          // Fly toward bucket
-          const dx = p.targetX - p.x;
-          const dy = p.targetY - p.y;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          if (dist < 4) {
-            p.phase = 'done';
-            // Increment bucket
-            const bucket = s.buckets.get(p.color);
-            if (bucket) {
-              bucket.count++;
-              bucket.flashTimer = 1;
-            }
-          } else {
-            const factor = Math.min(1, spd * 2.5 / dist);
-            p.x += dx * factor;
-            p.y += dy * factor;
-          }
-          p.size *= 0.992;
-          break;
-
-        case 'done':
-          p.opacity -= 0.12;
-          if (p.opacity <= 0) toRemove.push(i);
-          break;
+      if (p.progress < 0.4) {
+        // Source → engine (straight horizontal)
+        const t = p.progress / 0.4;
+        px = srcX + (engineX - srcX) * t;
+        py = midY + Math.sin(t * Math.PI) * -4; // slight arc up
+      } else if (p.progress < 0.55) {
+        // Through engine (pulse)
+        const t = (p.progress - 0.4) / 0.15;
+        px = engineX;
+        py = midY;
+        // Scale pulse
+        p.opacity = 0.6 + Math.sin(t * Math.PI) * 0.4;
+      } else {
+        // Engine → bucket (curve toward target)
+        const t = (p.progress - 0.55) / 0.45;
+        const eased = t * t * (3 - 2 * t); // smoothstep
+        px = engineX + (bucketStartX - engineX + 4) * eased;
+        py = midY + (targetY - midY) * eased;
       }
 
-      // Draw trail
-      if (p.trail.length > 1 && p.opacity > 0.1) {
-        ctx.beginPath();
-        ctx.moveTo(p.trail[0].x, p.trail[0].y);
-        for (let t = 1; t < p.trail.length; t++) {
-          ctx.lineTo(p.trail[t].x, p.trail[t].y);
-        }
-        ctx.strokeStyle = p.hex + '15';
-        ctx.lineWidth = p.size * 0.3;
+      if (p.opacity <= 0) continue;
+      ctx.globalAlpha = p.opacity;
+
+      const cardW = 22, cardH = 14;
+      // Draw card
+      if (p.img && p.img.complete && p.img.naturalWidth > 0) {
+        ctx.save();
+        rr(ctx, px - cardW / 2, py - cardH / 2, cardW, cardH, 2);
+        ctx.clip();
+        ctx.drawImage(p.img, px - cardW / 2, py - cardH / 2, cardW, cardH);
+        ctx.restore();
+        ctx.strokeStyle = p.hex;
+        ctx.lineWidth = 1.5;
+        rr(ctx, px - cardW / 2, py - cardH / 2, cardW, cardH, 2);
         ctx.stroke();
+      } else {
+        ctx.fillStyle = p.hex;
+        rr(ctx, px - cardW / 2, py - cardH / 2, cardW, cardH, 2);
+        ctx.fill();
+        // Filename
+        ctx.fillStyle = 'rgba(255,255,255,0.8)';
+        ctx.font = '500 5px "Outfit"';
+        ctx.textAlign = 'center';
+        const short = p.filename.length > 8 ? p.filename.slice(0, 7) + '…' : p.filename;
+        ctx.fillText(short, px, py + 2);
       }
 
-      // Draw particle as color card
-      if (p.opacity > 0) {
-        const cardW = p.size * 1.6;
-        const cardH = p.size;
-        ctx.globalAlpha = p.opacity;
-
-        // Try to draw thumbnail
-        if (p.img && p.img.complete && p.img.naturalWidth > 0) {
-          ctx.save();
-          roundRect(ctx, p.x - cardW / 2, p.y - cardH / 2, cardW, cardH, 3);
-          ctx.clip();
-          ctx.drawImage(p.img, p.x - cardW / 2, p.y - cardH / 2, cardW, cardH);
-          ctx.restore();
-          // Color border
-          ctx.strokeStyle = p.hex;
-          ctx.lineWidth = 1.5;
-          roundRect(ctx, p.x - cardW / 2, p.y - cardH / 2, cardW, cardH, 3);
-          ctx.stroke();
-        } else {
-          // Solid color card fallback
-          ctx.fillStyle = p.hex;
-          roundRect(ctx, p.x - cardW / 2, p.y - cardH / 2, cardW, cardH, 3);
-          ctx.fill();
-          // Filename text
-          ctx.fillStyle = 'rgba(255,255,255,0.85)';
-          ctx.font = '500 6px "Outfit", sans-serif';
-          ctx.textAlign = 'center';
-          const shortName = p.filename.length > 10 ? p.filename.slice(0, 9) + '…' : p.filename;
-          ctx.fillText(shortName, p.x, p.y + 2);
-        }
-
-        // Glow when passing through engine
-        if (p.phase === 'travel' && p.x > engineX - 12 && p.x < engineX + 12) {
-          ctx.fillStyle = p.hex + '30';
-          roundRect(ctx, p.x - cardW / 2 - 3, p.y - cardH / 2 - 3, cardW + 6, cardH + 6, 5);
-          ctx.fill();
-        }
-        ctx.globalAlpha = 1;
+      // Glow near engine
+      if (p.progress > 0.35 && p.progress < 0.6) {
+        ctx.fillStyle = p.hex + '20';
+        rr(ctx, px - cardW / 2 - 2, py - cardH / 2 - 2, cardW + 4, cardH + 4, 3);
+        ctx.fill();
       }
+      ctx.globalAlpha = 1;
     }
 
-    // Remove dead particles (reverse order)
-    for (let i = toRemove.length - 1; i >= 0; i--) {
-      s.particles.splice(toRemove[i], 1);
-    }
+    for (let i = toRemove.length - 1; i >= 0; i--) s.particles.splice(toRemove[i], 1);
 
-    // Continue animation
-    if (isProcessing || s.particles.length > 0 || s.pendingQueue.length > 0) {
+    // Continue loop if active
+    if (isProcessing || s.particles.length > 0 || s.pending.length > 0) {
       s.animId = requestAnimationFrame(render);
     }
   }, [isProcessing, totalProcessed, totalImages]);
 
-  // Start/stop animation loop
   useEffect(() => {
-    const s = stateRef.current;
-    s.lastTime = performance.now();
-    s.animId = requestAnimationFrame(render);
-    return () => cancelAnimationFrame(s.animId);
+    stateRef.current.lastTime = performance.now();
+    stateRef.current.animId = requestAnimationFrame(render);
+    return () => cancelAnimationFrame(stateRef.current.animId);
   }, [render]);
 
-  // Reset buckets from results on mount / results change
-  useEffect(() => {
-    const s = stateRef.current;
-    // Sync bucket counts from actual results
-    const counts = new Map<string, number>();
-    results.forEach(r => {
-      counts.set(r.color, (counts.get(r.color) || 0) + 1);
-    });
-    counts.forEach((count, color) => {
-      const hex = COLOR_HEX[color] || '#94a3b8';
-      if (!s.buckets.has(color)) {
-        s.buckets.set(color, { color, hex, count, flashTimer: 0 });
-      } else {
-        s.buckets.get(color)!.count = count;
-      }
-    });
-  }, [results]);
-
-  return (
-    <canvas
-      ref={canvasRef}
-      className="w-full"
-      style={{ height: 180, display: 'block' }}
-    />
-  );
+  return <canvas ref={canvasRef} className="w-full" style={{ height: 170, display: 'block' }} />;
 }
 
-// ── Helpers ──
-function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+function rr(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
   ctx.beginPath();
   ctx.moveTo(x + r, y);
   ctx.lineTo(x + w - r, y);

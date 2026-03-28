@@ -1133,7 +1133,7 @@ export default function SortPage() {
               </div>
               <div className="w-full bg-white/5 rounded-full h-4 overflow-hidden relative">
                 <div
-                  className="h-4 rounded-full transition-all duration-700 ease-out relative"
+                  className="h-4 rounded-full transition-all duration-1000 ease-[cubic-bezier(0.4,0,0.2,1)] relative"
                   style={{ width: `${progressPct}%`, background: stats.processed === 0 && stats.extracted > 0 ? 'linear-gradient(90deg, #16a34a, #22c55e, #4ade80)' : 'linear-gradient(90deg, #dc2626, #ef4444, #f97316)' }}
                 >
                   <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent animate-pulse" />

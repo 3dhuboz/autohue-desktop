@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 
 interface TachoGaugeProps {
   value: number;
@@ -12,31 +12,52 @@ interface TachoGaugeProps {
   subtitle?: string;
 }
 
+// Spring physics constants — smooth, continuous, never jerky
+const SPRING_STIFFNESS = 0.08;  // How fast it moves toward target
+const SPRING_DAMPING = 0.72;    // How much velocity is retained (1 = no damping)
+
 export default function TachoGauge({
   value, label, unit, displayValue, size = 200, variant = 'red', redZoneStart = 80, subtitle,
 }: TachoGaugeProps) {
   const [animatedValue, setAnimatedValue] = useState(0);
-  const prevValue = useRef(0);
+  const springRef = useRef({ current: 0, velocity: 0, target: 0 });
   const rafRef = useRef<number>(0);
+  const runningRef = useRef(false);
+
+  const tick = useCallback(() => {
+    const s = springRef.current;
+    const dx = s.target - s.current;
+    const acceleration = dx * SPRING_STIFFNESS;
+    s.velocity = (s.velocity + acceleration) * SPRING_DAMPING;
+    s.current += s.velocity;
+
+    // Stop when close enough and barely moving
+    if (Math.abs(dx) < 0.01 && Math.abs(s.velocity) < 0.001) {
+      s.current = s.target;
+      s.velocity = 0;
+      setAnimatedValue(s.current);
+      runningRef.current = false;
+      return;
+    }
+
+    setAnimatedValue(s.current);
+    rafRef.current = requestAnimationFrame(tick);
+  }, []);
 
   useEffect(() => {
-    const start = prevValue.current;
-    const end = Math.min(Math.max(value, 0), 100);
-    const duration = 750;
-    const startTime = performance.now();
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    const animate = (now: number) => {
-      const elapsed = now - startTime;
-      const progress = Math.min(elapsed / duration, 1);
-      const eased = progress < 0.5 ? 4 * progress * progress * progress : 1 - Math.pow(-2 * progress + 2, 3) / 2;
-      const current = start + (end - start) * eased;
-      setAnimatedValue(current);
-      if (progress < 1) rafRef.current = requestAnimationFrame(animate);
-    };
-    rafRef.current = requestAnimationFrame(animate);
-    prevValue.current = end;
+    const target = Math.min(Math.max(value, 0), 100);
+    springRef.current.target = target;
+
+    // Start animation loop if not already running
+    if (!runningRef.current) {
+      runningRef.current = true;
+      rafRef.current = requestAnimationFrame(tick);
+    }
+  }, [value, tick]);
+
+  useEffect(() => {
     return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
-  }, [value]);
+  }, []);
 
   const cx = size / 2, cy = size / 2, radius = size / 2 - 20;
   const startAngle = 135, endAngle = 405, sweepAngle = 270;
