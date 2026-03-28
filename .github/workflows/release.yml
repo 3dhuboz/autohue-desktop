@@ -34,7 +34,7 @@ jobs:
           $version = (Get-Content package.json | ConvertFrom-Json).version
           $src = "dist/AutoHue Setup $version.exe"
           if (Test-Path $src) {
-            npx wrangler r2 object put "autohue-releases/AutoHue-Setup-$version.exe" --file "$src"
+            npx wrangler r2 object put "autohue-releases/AutoHue-Setup-$version.exe" --file "$src" --remote
             Write-Host "Uploaded AutoHue-Setup-$version.exe to R2"
           } else {
             Write-Host "WARNING: $src not found, skipping R2 upload"
@@ -67,7 +67,7 @@ jobs:
           VERSION=$(node -p "require('./package.json').version")
           DMG=$(find dist -name "*.dmg" | head -1)
           if [ -n "$DMG" ]; then
-            npx wrangler r2 object put "autohue-releases/AutoHue-${VERSION}.dmg" --file "$DMG"
+            npx wrangler r2 object put "autohue-releases/AutoHue-${VERSION}.dmg" --file "$DMG" --remote
             echo "Uploaded AutoHue-${VERSION}.dmg to R2"
           else
             echo "WARNING: No .dmg found, skipping R2 upload"
