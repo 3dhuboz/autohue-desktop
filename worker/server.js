@@ -462,13 +462,9 @@ async function classifySingleImage(imageBuffer, retries = 3) {
             },
             {
                 type: 'text',
-                text: SORT_BY_TYPE && DETECT_FEATURES
-                    ? `Identify the main subject, its color, and any action feature. Reply with EXACTLY: TYPE COLOR FEATURE. TYPE: car, motorcycle, person, truck, other. COLOR: ${COLOR_LIST_STR}. FEATURE: burnout, wheelstand, flames, drift, launch, crash, none. Example: "car red burnout" or "motorcycle blue none". RULES: Pick the LARGEST subject. Cream/beige/tan/champagne = cream. Dark charcoal/gunmetal = silver-grey. Grey-green metallic = silver-grey. Gold/bronze = yellow. Only "green" for vivid bright green.`
-                    : SORT_BY_TYPE
-                    ? `Identify the main subject and its color. Reply with EXACTLY two words: TYPE COLOR. TYPE: car, motorcycle, person, truck, other. COLOR: ${COLOR_LIST_STR}. Example: "car white" or "motorcycle red" or "person black". RULES: Focus on the LARGEST subject. Cream/beige/tan = cream. Dark charcoal/gunmetal = silver-grey. Grey-green metallic = silver-grey. Gold/bronze = yellow. Only "green" for vivid bright green. For people, use clothing color.`
-                    : DETECT_FEATURES
-                    ? `What is the BODY/PAINT color of the LARGEST car and any action feature? Reply with EXACTLY: COLOR FEATURE. COLOR: ${COLOR_LIST_STR}. FEATURE: burnout, wheelstand, flames, drift, launch, crash, none. Example: "red burnout" or "cream none". RULES: Pick the BIGGEST car. Cream/beige/tan = cream. Dark charcoal/gunmetal = silver-grey. Grey-green metallic = silver-grey. Gold/bronze = yellow. Only "green" for vivid bright green.`
-                    : `What is the BODY/PAINT color of the MAIN SUBJECT car in this photo? Reply with ONLY one word from: ${COLOR_LIST_STR}. RULES: The main subject is the car the photographer is FOCUSED ON — usually centered, in sharp focus, most prominent. IGNORE parked/background vehicles. Focus ONLY on subject car body paint. IGNORE smoke, sky, grass, barriers. Cream/beige/tan/champagne/sand = cream. Dark navy/midnight blue = blue. Dark charcoal/gunmetal = silver-grey. Grey-green metallic = silver-grey. Gold/bronze metallic = yellow. Only "green" for VIVID bright green. Only "yellow" for VIVID bright yellow. Multi-color/rat rod/patina cars with no clear dominant color = please-double-check.`,
+                // ALWAYS use high-accuracy color-only prompt. Type/feature detected separately below.
+                text: `What is the BODY/PAINT color of the MAIN SUBJECT car in this photo? Reply with ONLY one word from: ${COLOR_LIST_STR}. RULES: The main subject is the car the photographer is FOCUSED ON — usually centered, in sharp focus, most prominent. IGNORE parked/background vehicles. Focus ONLY on subject car body paint. IGNORE smoke, sky, grass, barriers. Cream/beige/tan/champagne/sand = cream. Dark navy/midnight blue = blue. Dark charcoal/gunmetal = silver-grey. Grey-green metallic = silver-grey. Gold/bronze metallic = yellow. Only "green" for VIVID bright green. Only "yellow" for VIVID bright yellow. Multi-color/rat rod/patina cars with no clear dominant color = please-double-check.`
+                + ((SORT_BY_TYPE || DETECT_FEATURES) ? ` Also on a SECOND line reply with:${SORT_BY_TYPE ? ' TYPE (car/motorcycle/person/truck/other)' : ''}${DETECT_FEATURES ? ' FEATURE (burnout/wheelstand/flames/drift/launch/crash/none)' : ''}. Example: "silver-grey\\n${SORT_BY_TYPE ? 'car' : ''}${SORT_BY_TYPE && DETECT_FEATURES ? ' ' : ''}${DETECT_FEATURES ? 'burnout' : ''}"` : ''),
             },
         ];
 
@@ -501,25 +497,37 @@ async function classifySingleImage(imageBuffer, retries = 3) {
         const data = await res.json();
         const rawText = (data.choices?.[0]?.message?.content || '').trim().toLowerCase();
 
-        // Parse response: could be "color", "type color", "color feature", or "type color feature"
-        const parts = rawText.replace(/[^a-z- ]/g, '').split(/\s+/).filter(Boolean);
+        // Parse response: line 1 = color, line 2 = type/feature (if requested)
+        const lines = rawText.split('\n').map(l => l.trim().replace(/[^a-z- ]/g, '')).filter(Boolean);
+        const colorLine = lines[0] || '';
+        const extraLine = lines[1] || '';
 
-        let type = 'car', color = '', feature = 'none';
+        // Extract color from first line (should be a single word)
+        const colorParts = colorLine.split(/\s+/).filter(Boolean);
+        let color = colorParts[0] || '';
+        let type = 'car', feature = 'none';
 
-        if (SORT_BY_TYPE && parts.length >= 2) {
-            // "type color [feature]"
-            type = VALID_TYPES.has(parts[0]) ? parts[0] : 'car';
-            color = parts[VALID_TYPES.has(parts[0]) ? 1 : 0];
-            if (parts.length >= 3 && DETECT_FEATURES) {
-                feature = VALID_FEATURES.has(parts[2]) ? parts[2] : 'none';
+        // Extract type/feature from second line if present
+        if (extraLine && (SORT_BY_TYPE || DETECT_FEATURES)) {
+            const extraParts = extraLine.split(/\s+/).filter(Boolean);
+            for (const p of extraParts) {
+                if (SORT_BY_TYPE && VALID_TYPES.has(p)) type = p;
+                if (DETECT_FEATURES && VALID_FEATURES.has(p)) feature = p;
             }
-        } else if (DETECT_FEATURES && parts.length >= 2) {
-            // "color feature"
-            color = parts[0];
-            feature = VALID_FEATURES.has(parts[1]) ? parts[1] : 'none';
-        } else {
-            // "color" only
-            color = parts[0] || '';
+        }
+
+        // Fallback: if model put everything on one line (old format), try parsing it
+        if (!VALID_COLORS.has(COLOR_MAP[color] || color) && colorParts.length > 1) {
+            // Try each word as a potential color
+            for (const p of colorParts) {
+                const mapped = COLOR_MAP[p] || p;
+                if (VALID_COLORS.has(mapped)) { color = p; break; }
+            }
+            // Extract type/feature from remaining words on same line
+            for (const p of colorParts) {
+                if (SORT_BY_TYPE && VALID_TYPES.has(p)) type = p;
+                if (DETECT_FEATURES && VALID_FEATURES.has(p)) feature = p;
+            }
         }
 
         const mappedColor = COLOR_MAP[color] || color;
@@ -530,14 +538,7 @@ async function classifySingleImage(imageBuffer, retries = 3) {
             return result;
         }
 
-        // Fallback: try first part as color
-        const fallback = COLOR_MAP[parts[0]] || parts[0] || '';
-        if (VALID_COLORS.has(fallback)) {
-            const result = { category: fallback, confidence: 0.95, method: 'openrouter' };
-            if (SORT_BY_TYPE) result.vehicleType = 'car';
-            return result;
-        }
-        console.warn(`[vision] Unrecognized: "${rawText}"`);
+        console.warn(`[vision] Unrecognized: "${rawText}" → color="${color}" mapped="${mappedColor}"`);
         return null;
     } catch (err) {
         if (attempt < retries - 1) {
