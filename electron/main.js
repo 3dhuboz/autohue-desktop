@@ -127,9 +127,16 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
+  const fs = require('fs');
+  const logFile = path.join(app.getPath('userData'), 'debug-startup.log');
+  const log = (msg) => { const line = `[${new Date().toISOString()}] ${msg}\n`; fs.appendFileSync(logFile, line); console.log(msg); };
+  log('App startup — v' + app.getVersion());
+
   // 1. Initialize SQLite database (async — sql.js loads WASM)
+  log('Step 1: initDatabase...');
   const dbPath = path.join(app.getPath('userData'), 'autohue.db');
   db = await initDatabase(dbPath);
+  log('Step 1: done');
 
   // 2. Initialize license manager
   licenseManager = new LicenseManager(db);
@@ -193,8 +200,6 @@ app.whenReady().then(async () => {
   const visionModel = modelRow ? modelRow.value : 'google/gemini-2.0-flash-001';
   if (openRouterKeys.length > 0) console.log(`[main] OpenRouter: ${openRouterKeys.length} keys loaded`);
 
-  const fs = require('fs');
-
   // 4. Start the AI worker process
   const storagePath = path.join(app.getPath('userData'), 'worker-data');
   fs.mkdirSync(storagePath, { recursive: true });
@@ -215,11 +220,13 @@ app.whenReady().then(async () => {
   workerManager.visionModel = visionModel;
   workerManager.sortByType = sortByType;
   workerManager.detectFeatures = detectFeatures;
-  workerManager.start().catch(err => {
-    console.error('Worker failed to start:', err.message);
+  log('Step 4: starting worker...');
+  workerManager.start().then(() => log('Step 4: worker ready')).catch(err => {
+    log('Step 4: worker FAILED — ' + err.message);
   });
 
   // Re-validate license in background (may fetch Claude key if first run after upgrade)
+  log('Step 4b: revalidating license...');
   licenseManager.tryRevalidate().then(() => {
     const freshKey = licenseManager.getClaudeApiKey();
     if (freshKey && freshKey !== claudeKey) {
@@ -228,7 +235,9 @@ app.whenReady().then(async () => {
   }).catch(() => {});
 
   // 5. Create window
+  log('Step 5: createWindow...');
   createWindow();
+  log('Step 5: window created');
 
   // 5b. System tray — keeps app running when window is closed
   try {

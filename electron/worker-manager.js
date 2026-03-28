@@ -101,7 +101,9 @@ class WorkerManager {
     }
 
     const orKeys = this.openRouterKeys;
+    console.log(`[worker] OpenRouter keys passed: ${orKeys.length}`);
     this.process = fork(serverPath, [], {
+      execArgv: ['--max-old-space-size=4096'],
       env: {
         ...process.env,
         PORT: String(this.port),

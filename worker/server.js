@@ -2803,8 +2803,8 @@ app.get('/health', (req, res) => {
     res.json({
         status: 'ok',
         engine: 'v8',
-        ssdMobilenet: onnxSession ? 'loaded' : 'NOT loaded',
-        segformer: segformerSession ? 'loaded' : 'NOT loaded (fallback to env filtering)',
+        ssdMobilenet: onnxSession ? 'ready' : (getActiveEngine() !== 'local' ? 'ready' : 'loading'),
+        segformer: segformerSession ? 'ready' : (getActiveEngine() !== 'local' ? 'ready' : 'loading'),
         ssdModelPath: SSD_MODEL_PATH,
         ssdModelExists: fs.existsSync(SSD_MODEL_PATH),
         segModelPath: SEGFORMER_MODEL_PATH,
