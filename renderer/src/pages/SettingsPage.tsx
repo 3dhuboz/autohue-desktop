@@ -418,15 +418,17 @@ export default function SettingsPage({ license, onRefresh }: Props) {
       <div className="glass-card rounded-2xl p-6 space-y-4">
         <h3 className="text-sm font-heading font-bold flex items-center gap-2">
           <span className="text-lg">🚗</span> Sort Options
+          {!['pro', 'unlimited'].includes(license.tier || '') && <span className="text-[9px] text-racing-400 font-bold ml-2 px-1.5 py-0.5 rounded bg-racing-500/10 border border-racing-500/20">PRO</span>}
         </h3>
 
-        <div className="flex items-center justify-between">
+        <div className={`flex items-center justify-between ${!['pro', 'unlimited'].includes(license.tier || '') ? 'opacity-40 pointer-events-none' : ''}`}>
           <div>
             <span className="text-xs text-white/70 font-heading font-bold block">Sort by Vehicle Type</span>
             <span className="text-[10px] text-white/30">Separate cars, bikes, people into subfolders (cars/white/, bikes/red/)</span>
           </div>
           <button
             onClick={async () => {
+              if (!['pro', 'unlimited'].includes(license.tier || '')) return;
               const current = await window.electronAPI.getSetting('sort_by_type');
               const next = current === 'true' ? 'false' : 'true';
               await window.electronAPI.setSetting('sort_by_type', next);
@@ -437,13 +439,14 @@ export default function SettingsPage({ license, onRefresh }: Props) {
             <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${sortByType ? 'translate-x-5' : ''}`} />
           </button>
         </div>
-        <div className="flex items-center justify-between">
+        <div className={`flex items-center justify-between ${!['pro', 'unlimited'].includes(license.tier || '') ? 'opacity-40 pointer-events-none' : ''}`}>
           <div>
             <span className="text-xs text-white/70 font-heading font-bold block">Feature Shot Detection</span>
             <span className="text-[10px] text-white/30">Tag burnouts, wheelstands, flames, drifts → copies to _highlights/ folder</span>
           </div>
           <button
             onClick={async () => {
+              if (!['pro', 'unlimited'].includes(license.tier || '')) return;
               const current = await window.electronAPI.getSetting('detect_features');
               const next = current === 'true' ? 'false' : 'true';
               await window.electronAPI.setSetting('detect_features', next);

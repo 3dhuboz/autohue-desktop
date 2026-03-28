@@ -121,6 +121,10 @@ export default function SortPage() {
   });
   const [sortByType, setSortByType] = useState(false);
   const [detectFeatures, setDetectFeatures] = useState(false);
+
+  // Tier gating: vehicle type + feature detection require Pro or above
+  const isDevMode = typeof window !== 'undefined' && window.location.hostname === 'localhost';
+  const canUseAdvancedSort = ['pro', 'unlimited'].includes(license?.tier || '') || isDevMode;
   const [downloading, setDownloading] = useState(false);
   const [downloadElapsed, setDownloadElapsed] = useState(0);
   const downloadTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -798,19 +802,19 @@ export default function SortPage() {
                   </button>
                 </div>
                 <p className="text-xs text-white/50 font-mono bg-white/[0.03] rounded-lg px-3 py-2 truncate">{folderPath}</p>
-                {/* Sort options */}
+                {/* Sort options — Pro+ only */}
                 <div className="flex flex-wrap gap-3 mt-4">
-                  <label className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white/[0.03] border border-white/10 cursor-pointer hover:border-racing-500/30 transition-colors select-none">
-                    <input type="checkbox" checked={sortByType} onChange={e => setSortByType(e.target.checked)}
-                      className="w-4 h-4 rounded accent-racing-500" />
+                  <label className={`flex items-center gap-2 px-3 py-2 rounded-xl border transition-colors select-none ${canUseAdvancedSort ? 'bg-white/[0.03] border-white/10 cursor-pointer hover:border-racing-500/30' : 'bg-white/[0.02] border-white/5 cursor-not-allowed opacity-50'}`}>
+                    <input type="checkbox" checked={sortByType} onChange={e => canUseAdvancedSort && setSortByType(e.target.checked)}
+                      disabled={!canUseAdvancedSort} className="w-4 h-4 rounded accent-racing-500" />
                     <span className="text-xs text-white/60">Sort by vehicle type</span>
-                    <span className="text-[10px] text-white/25">(cars / bikes / people)</span>
+                    {canUseAdvancedSort ? <span className="text-[10px] text-white/25">(cars / bikes / people)</span> : <span className="text-[9px] text-racing-400 font-bold">PRO</span>}
                   </label>
-                  <label className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white/[0.03] border border-white/10 cursor-pointer hover:border-racing-500/30 transition-colors select-none">
-                    <input type="checkbox" checked={detectFeatures} onChange={e => setDetectFeatures(e.target.checked)}
-                      className="w-4 h-4 rounded accent-racing-500" />
+                  <label className={`flex items-center gap-2 px-3 py-2 rounded-xl border transition-colors select-none ${canUseAdvancedSort ? 'bg-white/[0.03] border-white/10 cursor-pointer hover:border-racing-500/30' : 'bg-white/[0.02] border-white/5 cursor-not-allowed opacity-50'}`}>
+                    <input type="checkbox" checked={detectFeatures} onChange={e => canUseAdvancedSort && setDetectFeatures(e.target.checked)}
+                      disabled={!canUseAdvancedSort} className="w-4 h-4 rounded accent-racing-500" />
                     <span className="text-xs text-white/60">Detect feature shots</span>
-                    <span className="text-[10px] text-white/25">(wheelstands, flames, burnouts)</span>
+                    {canUseAdvancedSort ? <span className="text-[10px] text-white/25">(wheelstands, flames, burnouts)</span> : <span className="text-[9px] text-racing-400 font-bold">PRO</span>}
                   </label>
                 </div>
                 <div className="flex flex-col items-center gap-4 mt-6">
@@ -868,19 +872,19 @@ export default function SortPage() {
                       className="w-full bg-white/[0.03] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white/70 placeholder:text-white/20 focus:outline-none focus:border-racing-500/40 transition-colors"
                     />
                   </div>
-                  {/* Sort options */}
+                  {/* Sort options — Pro+ only */}
                   <div className="flex flex-wrap justify-center gap-3 w-full max-w-md">
-                    <label className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white/[0.03] border border-white/10 cursor-pointer hover:border-racing-500/30 transition-colors select-none">
-                      <input type="checkbox" checked={sortByType} onChange={e => setSortByType(e.target.checked)}
-                        className="w-4 h-4 rounded accent-racing-500" />
+                    <label className={`flex items-center gap-2 px-3 py-2 rounded-xl border transition-colors select-none ${canUseAdvancedSort ? 'bg-white/[0.03] border-white/10 cursor-pointer hover:border-racing-500/30' : 'bg-white/[0.02] border-white/5 cursor-not-allowed opacity-50'}`}>
+                      <input type="checkbox" checked={sortByType} onChange={e => canUseAdvancedSort && setSortByType(e.target.checked)}
+                        disabled={!canUseAdvancedSort} className="w-4 h-4 rounded accent-racing-500" />
                       <span className="text-xs text-white/60">Sort by vehicle type</span>
-                      <span className="text-[10px] text-white/25">(cars / bikes / people)</span>
+                      {canUseAdvancedSort ? <span className="text-[10px] text-white/25">(cars / bikes / people)</span> : <span className="text-[9px] text-racing-400 font-bold">PRO</span>}
                     </label>
-                    <label className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white/[0.03] border border-white/10 cursor-pointer hover:border-racing-500/30 transition-colors select-none">
-                      <input type="checkbox" checked={detectFeatures} onChange={e => setDetectFeatures(e.target.checked)}
-                        className="w-4 h-4 rounded accent-racing-500" />
+                    <label className={`flex items-center gap-2 px-3 py-2 rounded-xl border transition-colors select-none ${canUseAdvancedSort ? 'bg-white/[0.03] border-white/10 cursor-pointer hover:border-racing-500/30' : 'bg-white/[0.02] border-white/5 cursor-not-allowed opacity-50'}`}>
+                      <input type="checkbox" checked={detectFeatures} onChange={e => canUseAdvancedSort && setDetectFeatures(e.target.checked)}
+                        disabled={!canUseAdvancedSort} className="w-4 h-4 rounded accent-racing-500" />
                       <span className="text-xs text-white/60">Detect feature shots</span>
-                      <span className="text-[10px] text-white/25">(wheelstands, flames, burnouts)</span>
+                      {canUseAdvancedSort ? <span className="text-[10px] text-white/25">(wheelstands, flames, burnouts)</span> : <span className="text-[9px] text-racing-400 font-bold">PRO</span>}
                     </label>
                   </div>
                   <button
