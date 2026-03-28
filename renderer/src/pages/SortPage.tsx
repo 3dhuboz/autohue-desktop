@@ -69,7 +69,7 @@ interface ProcessingStats {
   imagesPerSecond: number;
   avgConfidence: number;
   timeSavedSeconds: number;
-  results: Array<{ file: string; color: string; confidence: number; thumb?: string | null }>;
+  results: Array<{ file: string; filename?: string; color: string; confidence: number; thumb?: string | null }>;
   colorCounts: Record<string, number>;
 }
 
@@ -83,9 +83,13 @@ export default function SortPage() {
     const api = (window as any).electronAPI;
     if (!api?.onDownloadComplete) return;
     api.onDownloadComplete((data: { filename: string; path: string }) => {
+      setDownloading(false);
+      if (downloadTimerRef.current) clearInterval(downloadTimerRef.current);
       showToast(`Saved: ${data.filename}`, 'success');
     });
     api.onDownloadCancelled?.(() => {
+      setDownloading(false);
+      if (downloadTimerRef.current) clearInterval(downloadTimerRef.current);
       showToast('Download cancelled', 'info');
     });
   }, [showToast]);
@@ -117,7 +121,11 @@ export default function SortPage() {
   });
   const [sortByType, setSortByType] = useState(false);
   const [detectFeatures, setDetectFeatures] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const [downloadElapsed, setDownloadElapsed] = useState(0);
+  const downloadTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [preClassifyBridge, setPreClassifyBridge] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const cursorRef = useRef(0);
@@ -355,10 +363,11 @@ export default function SortPage() {
 
         if (data.new_results?.length) {
           cursorRef.current += data.new_results.length;
+          if (preClassifyBridge) setPreClassifyBridge(false);
           setStats(prev => {
             const confMap: Record<string, number> = { high: 0.95, medium: 0.75, low: 0.5, none: 0.3 };
-            const newResults = [...prev.results, ...data.new_results.map((r: { file: string; color: string; confidence: string | number; thumb?: string | null }) => ({
-              file: r.file, color: r.color,
+            const newResults = [...prev.results, ...data.new_results.map((r: { file?: string; filename?: string; color: string; confidence: string | number; thumb?: string | null }) => ({
+              file: r.file || r.filename || '', color: r.color,
               confidence: typeof r.confidence === 'number' ? r.confidence : (confMap[r.confidence] ?? 0.5),
               thumb: r.thumb || null,
             }))];
@@ -398,9 +407,10 @@ export default function SortPage() {
         }
 
         // Incremental usage recording — every 20 images, update quota counter
-        if (processed > 0 && processed - lastRecordedCount.current >= 20) {
-          lastRecordedCount.current = processed;
-          recordUsage(sid, processed, data.color_counts || {}).then(() => refreshLicense()).catch(() => {});
+        const currentProcessed = data.processed || 0;
+        if (currentProcessed > 0 && currentProcessed - lastRecordedCount.current >= 20) {
+          lastRecordedCount.current = currentProcessed;
+          recordUsage(sid, currentProcessed, data.color_counts || {}).then(() => refreshLicense()).catch(() => {});
         }
 
         if (data.status === 'extracting') {
@@ -417,8 +427,9 @@ export default function SortPage() {
             currentFile: data.current_file || 'Extracting archive...',
           }));
         } else if (data.status === 'processing' && extractionPhase.active) {
-          // Transition from extraction to classification
+          // Transition from extraction to classification — trigger bridge animation
           setExtractionPhase(prev => ({ ...prev, active: false }));
+          setPreClassifyBridge(true);
         }
 
         if (data.status === 'paused') {
@@ -1026,6 +1037,64 @@ export default function SortPage() {
               </div>
             )}
 
+            {/* ── Bridge Animation — links extraction to classification ── */}
+            {preClassifyBridge && stats.processed === 0 && phase === 'processing' && !paused && !extractionPhase.active && (
+              <div className="glass-card rounded-3xl p-8 text-center animate-fade-up">
+                <style>{`
+                  @keyframes engine-warmup {
+                    0% { transform: scale(0.95); opacity: 0.5; }
+                    50% { transform: scale(1.08); opacity: 1; }
+                    100% { transform: scale(0.95); opacity: 0.5; }
+                  }
+                  @keyframes color-orbit {
+                    from { transform: rotate(0deg) translateX(36px) rotate(0deg); }
+                    to { transform: rotate(360deg) translateX(36px) rotate(-360deg); }
+                  }
+                  @keyframes bridge-progress {
+                    0% { width: 5%; }
+                    40% { width: 55%; }
+                    80% { width: 85%; }
+                    100% { width: 95%; }
+                  }
+                `}</style>
+                <div className="relative inline-flex items-center justify-center mb-6">
+                  {/* Orbiting color dots */}
+                  {['#ef4444','#3b82f6','#22c55e','#eab308','#f97316','#a855f7'].map((c, i) => (
+                    <div key={i} className="absolute" style={{
+                      width: 8, height: 8, borderRadius: '50%', backgroundColor: c,
+                      animation: `color-orbit ${1.8 + i * 0.15}s linear ${i * 0.3}s infinite`,
+                      boxShadow: `0 0 8px ${c}66`,
+                    }} />
+                  ))}
+                  {/* Core engine */}
+                  <div className="w-20 h-20 rounded-full flex items-center justify-center" style={{
+                    background: 'radial-gradient(circle at 35% 35%, #2a2a3e, #16162a)',
+                    boxShadow: '0 0 30px rgba(220,38,38,0.2), 0 0 60px rgba(220,38,38,0.08)',
+                    animation: 'engine-warmup 1.5s ease-in-out infinite',
+                  }}>
+                    <BrainIcon size={32} className="text-racing-500" />
+                  </div>
+                </div>
+                <h3 className="text-lg font-heading font-bold text-racing-400 mb-2">
+                  Initializing AI Engine
+                </h3>
+                <p className="text-white/40 text-sm mb-1">
+                  {stats.total > 0 ? `${stats.total.toLocaleString()} images ready` : 'Images loaded'} — preparing color classification pipeline
+                </p>
+                <p className="text-white/20 text-xs mb-5">
+                  Loading ONNX models and CIE LAB color space...
+                </p>
+                <div className="max-w-xs mx-auto">
+                  <div className="w-full h-2 bg-white/5 rounded-full overflow-hidden">
+                    <div className="h-full rounded-full" style={{
+                      background: 'linear-gradient(90deg, #dc2626, #ef4444, #f97316)',
+                      animation: 'bridge-progress 4s ease-out forwards',
+                    }} />
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Gauges — hide when nothing classified yet (extraction/prep phase) */}
             <div className={`glass-card rounded-3xl p-6 ${stats.processed === 0 && phase === 'processing' ? 'hidden' : ''}`}>
               <div className="grid grid-cols-3 lg:grid-cols-6 gap-4 items-start">
@@ -1103,16 +1172,21 @@ export default function SortPage() {
                     )}
                     {/* Step node */}
                     <div className="flex flex-col items-center gap-1.5 flex-1">
-                      <div
-                        className={`w-12 h-12 rounded-xl flex items-center justify-center transition-all duration-500 border ${
-                          step.active
-                            ? `${step.bgActive} ${step.borderActive} ${!step.done ? 'animate-pulse' : ''}`
-                            : 'bg-white/5 border-white/10'
-                        }`}
-                      >
-                        <span className={step.active ? step.textActive : 'text-white/20'}>
-                          {step.done ? <CheckIcon size={18} /> : step.icon}
-                        </span>
+                      <div className="relative">
+                        <div
+                          className={`w-12 h-12 rounded-xl flex items-center justify-center transition-all duration-500 border ${
+                            step.active
+                              ? `${step.bgActive} ${step.borderActive} ${!step.done ? 'animate-pulse' : ''}`
+                              : 'bg-white/5 border-white/10'
+                          }`}
+                        >
+                          <span className={step.active ? step.textActive : 'text-white/20'}>
+                            {step.done ? <CheckIcon size={18} /> : step.icon}
+                          </span>
+                        </div>
+                        <span className={`absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full text-[8px] font-bold flex items-center justify-center ${
+                          step.active ? 'bg-white/10 text-white/50' : 'bg-white/5 text-white/15'
+                        }`}>{i + 1}</span>
                       </div>
                       <span className="text-[9px] text-white/30">{step.label}</span>
                       {step.sub && <span className="text-[8px] text-white/20">{step.sub}</span>}
@@ -1317,13 +1391,20 @@ export default function SortPage() {
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-4">
               <button
                 onClick={() => {
+                  if (downloading) return;
+                  setDownloading(true);
+                  setDownloadElapsed(0);
+                  if (downloadTimerRef.current) clearInterval(downloadTimerRef.current);
+                  downloadTimerRef.current = setInterval(() => setDownloadElapsed(p => p + 1), 1000);
                   showToast('Building ZIP — this may take a moment for large batches...', 'info');
-                  // Use window.open to trigger Electron's setWindowOpenHandler → downloadURL
                   window.open(`${workerUrl}/download/${sessionId}`, '_blank');
+                  setTimeout(() => { setDownloading(false); if (downloadTimerRef.current) clearInterval(downloadTimerRef.current); }, 60000);
                 }}
-                className="btn-racing btn-ripple px-10 py-4 rounded-2xl text-lg shadow-xl glow-red flex items-center gap-3 transition-transform hover:scale-[1.02] active:scale-[0.98]"
+                disabled={downloading}
+                className={`btn-racing btn-ripple px-10 py-4 rounded-2xl text-lg shadow-xl glow-red flex items-center gap-3 transition-transform ${downloading ? 'opacity-80 cursor-wait' : 'hover:scale-[1.02] active:scale-[0.98]'}`}
               >
-                <DownloadIcon size={20} /> Download Sorted ZIP
+                {downloading ? <SpinnerIcon size={20} className="text-white" /> : <DownloadIcon size={20} />}
+                {downloading ? `Building ZIP... ${downloadElapsed}s` : 'Download Sorted ZIP'}
               </button>
               <button
                 onClick={handleOpenOutput}

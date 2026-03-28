@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useEffect, useRef, useCallback } from 'react';
 
 // ── Types ──
 interface SortResult {
@@ -15,268 +15,422 @@ interface SortAnimationProps {
 }
 
 // ── Color lookup ──
-const COLOR_SWATCHES: Record<string, string> = {
+const COLOR_HEX: Record<string, string> = {
   red: '#ef4444', blue: '#3b82f6', green: '#22c55e', yellow: '#eab308',
   orange: '#f97316', purple: '#a855f7', pink: '#ec4899', brown: '#a16207',
-  black: '#334155', white: '#e2e8f0', 'silver-grey': '#94a3b8', cream: '#fef3c7',
-  unknown: '#f87171', 'please-double-check': '#f59e0b',
+  black: '#475569', white: '#e2e8f0', 'silver-grey': '#94a3b8', cream: '#fef3c7',
+  gold: '#d97706', unknown: '#f87171', 'please-double-check': '#f59e0b',
 };
 
-const COLOR_LABELS: Record<string, string> = {
-  red: 'Red', blue: 'Blue', green: 'Green', yellow: 'Yellow',
-  orange: 'Orange', purple: 'Purple', pink: 'Pink', brown: 'Brown',
-  black: 'Black', white: 'White', 'silver-grey': 'Silver/Grey', cream: 'Cream',
-  unknown: 'Unknown', 'please-double-check': 'Review',
-};
-
-// Flying dot in the stream
-interface StreamDot {
+// Particle in the stream
+interface Particle {
   id: number;
   color: string;
-  x: number; // 0-100 progress across track
-  thumb: string | null;
+  hex: string;
+  x: number;
+  y: number;
+  targetX: number;
+  targetY: number;
+  size: number;
+  opacity: number;
+  phase: 'enter' | 'travel' | 'sort' | 'done';
+  bucketIdx: number;
+  speed: number;
+  trail: { x: number; y: number }[];
 }
 
+// Bucket accumulator
+interface Bucket {
+  color: string;
+  hex: string;
+  count: number;
+  flashTimer: number;
+}
+
+const MAX_PARTICLES = 60;
+const BUCKET_COLORS = ['red', 'blue', 'green', 'yellow', 'orange', 'purple', 'pink', 'brown', 'black', 'white', 'silver-grey', 'cream'];
+
 export default function SortAnimation({ results, isProcessing, totalProcessed, totalImages }: SortAnimationProps) {
-  const [dots, setDots] = useState<StreamDot[]>([]);
-  const [recentColors, setRecentColors] = useState<{ color: string; id: number }[]>([]);
-  const processedRef = useRef(0);
-  const dotIdRef = useRef(0);
-  const animFrameRef = useRef<number>(0);
-  const lastTickRef = useRef(performance.now());
-  const pendingRef = useRef<SortResult[]>([]);
-  const spawnTimerRef = useRef(0);
-
-  // Track throughput for speed display
-  const throughputRef = useRef<number[]>([]);
-  const lastCountRef = useRef(0);
-  const throughputTimerRef = useRef<ReturnType<typeof setInterval>>();
-
-  // Measure throughput every second
-  useEffect(() => {
-    throughputTimerRef.current = setInterval(() => {
-      const current = processedRef.current;
-      const delta = current - lastCountRef.current;
-      lastCountRef.current = current;
-      throughputRef.current.push(delta);
-      if (throughputRef.current.length > 5) throughputRef.current.shift();
-    }, 1000);
-    return () => clearInterval(throughputTimerRef.current);
-  }, []);
-
-  const avgSpeed = useMemo(() => {
-    const arr = throughputRef.current;
-    if (arr.length === 0) return 0;
-    return arr.reduce((a, b) => a + b, 0) / arr.length;
-  }, [dots]); // recalc when dots change
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const stateRef = useRef({
+    particles: [] as Particle[],
+    buckets: new Map<string, Bucket>(),
+    processedCount: 0,
+    nextId: 0,
+    pendingQueue: [] as SortResult[],
+    spawnAccum: 0,
+    lastTime: 0,
+    animId: 0,
+  });
 
   // Enqueue new results
   useEffect(() => {
-    if (results.length > processedRef.current) {
-      const newItems = results.slice(processedRef.current);
-      processedRef.current = results.length;
-      pendingRef.current.push(...newItems);
+    const s = stateRef.current;
+    if (results.length > s.processedCount) {
+      const newItems = results.slice(s.processedCount);
+      s.processedCount = results.length;
+      s.pendingQueue.push(...newItems);
     }
   }, [results]);
 
-  // Animation loop — spawns dots from pending queue and moves them across
-  useEffect(() => {
-    if (!isProcessing && pendingRef.current.length === 0 && dots.length === 0) return;
+  const render = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
 
-    const tick = (now: number) => {
-      const dt = Math.min(now - lastTickRef.current, 50); // cap delta
-      lastTickRef.current = now;
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    const W = rect.width;
+    const H = rect.height;
 
-      // Speed: how fast dots travel (% per ms) — scales with throughput
-      const speed = Math.max(0.04, Math.min(0.15, avgSpeed * 0.025 + 0.04));
+    // Resize canvas if needed
+    if (canvas.width !== W * dpr || canvas.height !== H * dpr) {
+      canvas.width = W * dpr;
+      canvas.height = H * dpr;
+      ctx.scale(dpr, dpr);
+    }
 
-      // Spawn interval: faster spawn when more pending
-      const spawnInterval = pendingRef.current.length > 20 ? 60
-        : pendingRef.current.length > 5 ? 120
-        : 200;
+    const s = stateRef.current;
+    const now = performance.now();
+    const dt = Math.min(now - (s.lastTime || now), 33); // cap at ~30fps delta
+    s.lastTime = now;
 
-      spawnTimerRef.current += dt;
+    // ── Layout ──
+    const funnelX = W * 0.08;      // left: source
+    const engineX = W * 0.42;      // center: AI engine
+    const bucketStartX = W * 0.65; // right: color buckets
+    const centerY = H * 0.45;
+    const bucketW = 28;
+    const bucketH = 20;
 
-      // Spawn new dots from pending queue
-      if (pendingRef.current.length > 0 && spawnTimerRef.current >= spawnInterval) {
-        spawnTimerRef.current = 0;
-        // Spawn multiple if heavily backed up
-        const spawnCount = pendingRef.current.length > 30 ? 3 : pendingRef.current.length > 10 ? 2 : 1;
-        const newDots: StreamDot[] = [];
-        for (let i = 0; i < spawnCount && pendingRef.current.length > 0; i++) {
-          const item = pendingRef.current.shift()!;
-          newDots.push({
-            id: dotIdRef.current++,
-            color: item.color,
-            x: -2 - i * 3, // stagger start positions slightly
-            thumb: item.thumb,
-          });
-        }
-        setDots(prev => [...prev, ...newDots]);
-        setRecentColors(prev => {
-          const updated = [...newDots.map(d => ({ color: d.color, id: d.id })), ...prev];
-          return updated.slice(0, 30);
-        });
+    // Active buckets (only those with results)
+    const activeBuckets = Array.from(s.buckets.values()).sort((a, b) => b.count - a.count);
+    const bucketSpacing = Math.min(32, (H - 20) / Math.max(activeBuckets.length, 1));
+
+    // ── Spawn particles from queue ──
+    const spawnRate = s.pendingQueue.length > 30 ? 16 : s.pendingQueue.length > 10 ? 30 : 50;
+    s.spawnAccum += dt;
+    while (s.spawnAccum >= spawnRate && s.pendingQueue.length > 0 && s.particles.length < MAX_PARTICLES) {
+      s.spawnAccum -= spawnRate;
+      const item = s.pendingQueue.shift()!;
+      const hex = COLOR_HEX[item.color] || '#94a3b8';
+
+      // Ensure bucket exists
+      if (!s.buckets.has(item.color)) {
+        s.buckets.set(item.color, { color: item.color, hex, count: 0, flashTimer: 0 });
+      }
+      const bucket = s.buckets.get(item.color)!;
+      const bucketIdx = activeBuckets.indexOf(bucket);
+
+      s.particles.push({
+        id: s.nextId++,
+        color: item.color,
+        hex,
+        x: funnelX - 10,
+        y: centerY + (Math.random() - 0.5) * 20,
+        targetX: 0,
+        targetY: 0,
+        size: 5 + Math.random() * 3,
+        opacity: 0,
+        phase: 'enter',
+        bucketIdx: Math.max(0, bucketIdx),
+        speed: 0.15 + Math.random() * 0.1,
+        trail: [],
+      });
+    }
+
+    // ── Clear ──
+    ctx.clearRect(0, 0, W, H);
+
+    // ── Draw track line ──
+    const grad = ctx.createLinearGradient(funnelX, 0, engineX, 0);
+    grad.addColorStop(0, 'rgba(220,38,38,0.08)');
+    grad.addColorStop(1, 'rgba(220,38,38,0.03)');
+    ctx.strokeStyle = grad;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 6]);
+    ctx.beginPath();
+    ctx.moveTo(funnelX + 10, centerY);
+    ctx.lineTo(engineX - 18, centerY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // ── Draw source stack icon ──
+    ctx.fillStyle = 'rgba(255,255,255,0.06)';
+    ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+    ctx.lineWidth = 1;
+    const srcSize = 22;
+    roundRect(ctx, funnelX - srcSize / 2, centerY - srcSize / 2, srcSize, srcSize, 4);
+    ctx.fill();
+    ctx.stroke();
+    // Image icon inside
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    ctx.moveTo(funnelX - 6, centerY + 4);
+    ctx.lineTo(funnelX - 2, centerY);
+    ctx.lineTo(funnelX + 2, centerY + 3);
+    ctx.lineTo(funnelX + 6, centerY - 2);
+    ctx.stroke();
+
+    // Remaining count
+    const remaining = Math.max(0, (totalImages || 0) - (totalProcessed || 0));
+    ctx.fillStyle = 'rgba(249,115,22,0.7)';
+    ctx.font = '600 10px "Space Grotesk", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(String(remaining), funnelX, centerY + srcSize / 2 + 14);
+    ctx.fillStyle = 'rgba(255,255,255,0.15)';
+    ctx.font = '500 7px "Outfit", sans-serif';
+    ctx.fillText('QUEUE', funnelX, centerY + srcSize / 2 + 23);
+
+    // ── Draw AI Engine core ──
+    const engineR = 18;
+    const spinAngle = (now / 800) % (Math.PI * 2);
+    ctx.save();
+    ctx.translate(engineX, centerY);
+
+    // Glow
+    if (isProcessing && s.particles.length > 0) {
+      const lastHex = s.particles[s.particles.length - 1]?.hex || '#dc2626';
+      const glow = ctx.createRadialGradient(0, 0, 0, 0, 0, engineR * 2);
+      glow.addColorStop(0, lastHex + '18');
+      glow.addColorStop(1, 'transparent');
+      ctx.fillStyle = glow;
+      ctx.fillRect(-engineR * 2, -engineR * 2, engineR * 4, engineR * 4);
+    }
+
+    // Ring
+    ctx.beginPath();
+    ctx.arc(0, 0, engineR, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(22,22,42,0.9)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(220,38,38,0.2)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // Spinning color arcs
+    const arcColors = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#a855f7'];
+    arcColors.forEach((c, i) => {
+      const startA = spinAngle + (i * Math.PI * 2) / 6;
+      const endA = startA + Math.PI / 4;
+      ctx.beginPath();
+      ctx.arc(0, 0, engineR - 4, startA, endA);
+      ctx.strokeStyle = c + '99';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    });
+
+    // Center dot
+    ctx.beginPath();
+    ctx.arc(0, 0, 2.5, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.fill();
+
+    ctx.restore();
+
+    // Engine label
+    ctx.fillStyle = isProcessing ? 'rgba(34,197,94,0.5)' : 'rgba(255,255,255,0.15)';
+    ctx.font = '600 8px "Space Grotesk", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(isProcessing ? 'CLASSIFYING' : 'AI ENGINE', engineX, centerY + engineR + 14);
+
+    // ── Draw buckets ──
+    const bucketListStartY = 10;
+    activeBuckets.forEach((bucket, i) => {
+      const bx = bucketStartX;
+      const by = bucketListStartY + i * bucketSpacing;
+
+      // Flash effect
+      bucket.flashTimer = Math.max(0, bucket.flashTimer - dt / 300);
+      const flash = bucket.flashTimer;
+
+      // Bucket rectangle
+      ctx.fillStyle = bucket.hex + (flash > 0 ? '40' : '18');
+      ctx.strokeStyle = bucket.hex + (flash > 0 ? '80' : '30');
+      ctx.lineWidth = flash > 0 ? 1.5 : 0.8;
+      roundRect(ctx, bx, by, bucketW, bucketH, 3);
+      ctx.fill();
+      ctx.stroke();
+
+      // Color dot
+      ctx.beginPath();
+      ctx.arc(bx + 8, by + bucketH / 2, 4, 0, Math.PI * 2);
+      ctx.fillStyle = bucket.hex;
+      ctx.fill();
+
+      // Count
+      ctx.fillStyle = 'rgba(255,255,255,0.5)';
+      ctx.font = '600 9px "JetBrains Mono", monospace';
+      ctx.textAlign = 'left';
+      ctx.fillText(String(bucket.count), bx + bucketW + 6, by + bucketH / 2 + 3);
+
+      // Color label
+      ctx.fillStyle = 'rgba(255,255,255,0.2)';
+      ctx.font = '400 7px "Outfit", sans-serif';
+      const label = bucket.color === 'silver-grey' ? 'Silver' : bucket.color === 'please-double-check' ? 'Review' : bucket.color.charAt(0).toUpperCase() + bucket.color.slice(1);
+      ctx.fillText(label, bx + bucketW + 30, by + bucketH / 2 + 3);
+    });
+
+    // Sorted count
+    ctx.fillStyle = 'rgba(34,197,94,0.7)';
+    ctx.font = '700 11px "Space Grotesk", sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(String(totalProcessed ?? 0), bucketStartX, H - 8);
+    ctx.fillStyle = 'rgba(255,255,255,0.15)';
+    ctx.font = '500 7px "Outfit", sans-serif';
+    ctx.fillText('SORTED', bucketStartX + 36, H - 8);
+
+    // ── Update & draw particles ──
+    const toRemove: number[] = [];
+
+    for (let i = 0; i < s.particles.length; i++) {
+      const p = s.particles[i];
+      const spd = p.speed * dt;
+
+      // Store trail
+      p.trail.push({ x: p.x, y: p.y });
+      if (p.trail.length > 6) p.trail.shift();
+
+      switch (p.phase) {
+        case 'enter':
+          p.opacity = Math.min(1, p.opacity + 0.06);
+          p.x += spd * 1.8;
+          if (p.x >= engineX - engineR - 4) {
+            p.phase = 'travel';
+          }
+          break;
+
+        case 'travel':
+          // Pulse through the engine
+          p.x += spd * 1.2;
+          p.size = p.x < engineX ? p.size * 1.003 : p.size * 0.997;
+          if (p.x >= engineX + engineR + 4) {
+            p.phase = 'sort';
+            // Recompute bucket position (it may have shifted)
+            const freshBuckets = Array.from(s.buckets.values()).sort((a, b) => b.count - a.count);
+            const bIdx = freshBuckets.findIndex(b => b.color === p.color);
+            p.bucketIdx = Math.max(0, bIdx);
+            p.targetX = bucketStartX + 4;
+            p.targetY = bucketListStartY + p.bucketIdx * bucketSpacing + bucketH / 2;
+          }
+          break;
+
+        case 'sort':
+          // Fly toward bucket
+          const dx = p.targetX - p.x;
+          const dy = p.targetY - p.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < 4) {
+            p.phase = 'done';
+            // Increment bucket
+            const bucket = s.buckets.get(p.color);
+            if (bucket) {
+              bucket.count++;
+              bucket.flashTimer = 1;
+            }
+          } else {
+            const factor = Math.min(1, spd * 2.5 / dist);
+            p.x += dx * factor;
+            p.y += dy * factor;
+          }
+          p.size *= 0.992;
+          break;
+
+        case 'done':
+          p.opacity -= 0.12;
+          if (p.opacity <= 0) toRemove.push(i);
+          break;
       }
 
-      // Move all dots forward and remove completed ones
-      setDots(prev => {
-        const updated = prev.map(d => ({ ...d, x: d.x + speed * dt })).filter(d => d.x < 105);
-        return updated;
-      });
+      // Draw trail
+      if (p.trail.length > 1 && p.opacity > 0.1) {
+        ctx.beginPath();
+        ctx.moveTo(p.trail[0].x, p.trail[0].y);
+        for (let t = 1; t < p.trail.length; t++) {
+          ctx.lineTo(p.trail[t].x, p.trail[t].y);
+        }
+        ctx.strokeStyle = p.hex + '20';
+        ctx.lineWidth = p.size * 0.5;
+        ctx.stroke();
+      }
 
-      animFrameRef.current = requestAnimationFrame(tick);
-    };
+      // Draw particle
+      if (p.opacity > 0) {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size / 2, 0, Math.PI * 2);
+        ctx.fillStyle = p.hex;
+        ctx.globalAlpha = p.opacity;
+        ctx.fill();
 
-    animFrameRef.current = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(animFrameRef.current);
-  }, [isProcessing, avgSpeed, dots.length]);
+        // Glow
+        if (p.phase === 'travel' && p.x > engineX - 8 && p.x < engineX + 8) {
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+          ctx.fillStyle = p.hex + '44';
+          ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+      }
+    }
 
-  const remaining = Math.max(0, (totalImages || 0) - (totalProcessed || 0));
-  const progress = totalImages && totalImages > 0 ? Math.min(100, ((totalProcessed || 0) / totalImages) * 100) : 0;
+    // Remove dead particles (reverse order)
+    for (let i = toRemove.length - 1; i >= 0; i--) {
+      s.particles.splice(toRemove[i], 1);
+    }
+
+    // Continue animation
+    if (isProcessing || s.particles.length > 0 || s.pendingQueue.length > 0) {
+      s.animId = requestAnimationFrame(render);
+    }
+  }, [isProcessing, totalProcessed, totalImages]);
+
+  // Start/stop animation loop
+  useEffect(() => {
+    const s = stateRef.current;
+    s.lastTime = performance.now();
+    s.animId = requestAnimationFrame(render);
+    return () => cancelAnimationFrame(s.animId);
+  }, [render]);
+
+  // Reset buckets from results on mount / results change
+  useEffect(() => {
+    const s = stateRef.current;
+    // Sync bucket counts from actual results
+    const counts = new Map<string, number>();
+    results.forEach(r => {
+      counts.set(r.color, (counts.get(r.color) || 0) + 1);
+    });
+    counts.forEach((count, color) => {
+      const hex = COLOR_HEX[color] || '#94a3b8';
+      if (!s.buckets.has(color)) {
+        s.buckets.set(color, { color, hex, count, flashTimer: 0 });
+      } else {
+        s.buckets.get(color)!.count = count;
+      }
+    });
+  }, [results]);
 
   return (
-    <div className="space-y-3">
-      {/* ── Stream Animation ── */}
-      <div className="relative w-full select-none overflow-hidden" style={{ height: 160 }}>
-        <style>{`
-          @keyframes ah-core-spin { from{transform:rotate(0)} to{transform:rotate(360deg)} }
-          @keyframes ah-glow-pulse { 0%,100%{opacity:.15} 50%{opacity:.35} }
-          @keyframes ah-dot-pop { from{transform:scale(0);opacity:0} to{transform:scale(1);opacity:1} }
-          @keyframes ah-folder-bump { 0%{transform:scale(1)} 40%{transform:scale(1.15)} 100%{transform:scale(1)} }
-        `}</style>
-
-        {/* Track line with gradient */}
-        <div className="absolute top-1/2 left-14 right-14 -translate-y-1/2 h-[2px] rounded-full" style={{
-          background: `linear-gradient(90deg, rgba(220,38,38,0.15), rgba(220,38,38,0.08) 40%, rgba(34,197,94,0.08) 60%, rgba(34,197,94,0.15))`,
-        }} />
-        {/* Track dots */}
-        <div className="absolute top-1/2 left-14 right-14 -translate-y-1/2 h-px" style={{
-          backgroundImage: 'repeating-linear-gradient(90deg, rgba(255,255,255,0.04) 0, rgba(255,255,255,0.04) 2px, transparent 2px, transparent 10px)',
-        }} />
-
-        {/* LEFT: Source stack */}
-        <div className="absolute left-1 top-1/2 -translate-y-1/2 flex flex-col items-center gap-1 z-10">
-          <div className="w-11 h-11 rounded-xl border border-dashed border-white/10 flex items-center justify-center bg-white/[0.02]">
-            <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-white/20">
-              <rect x="2" y="2" width="12" height="12" rx="2" />
-              <circle cx="5.5" cy="5.5" r="1.5" fill="currentColor" fillOpacity=".3" />
-              <path d="M2 11L5 8L7 10L10 6L14 11" />
-            </svg>
-          </div>
-          <span className="text-[12px] text-orange-400/80 font-bold tabular-nums">{remaining}</span>
-          <span className="text-[7px] text-white/20 tracking-widest uppercase">Remaining</span>
-        </div>
-
-        {/* CENTER: AutoHue engine */}
-        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex flex-col items-center z-20">
-          <div className="relative w-14 h-14 flex items-center justify-center">
-            {/* Outer ring glow */}
-            <div className="absolute inset-[-8px] rounded-full" style={{
-              background: dots.length > 0
-                ? `radial-gradient(circle, ${COLOR_SWATCHES[dots[dots.length - 1]?.color] || '#dc2626'}12 0%, transparent 70%)`
-                : 'radial-gradient(circle, rgba(220,38,38,0.06) 0%, transparent 70%)',
-              animation: 'ah-glow-pulse 2s ease-in-out infinite',
-            }} />
-
-            {/* Core */}
-            <div className="w-12 h-12 rounded-full flex items-center justify-center" style={{
-              background: 'radial-gradient(circle at 35% 35%, #2a2a3e, #16162a)',
-              boxShadow: isProcessing && dots.length > 0
-                ? `0 0 20px ${COLOR_SWATCHES[dots[dots.length - 1]?.color] || '#dc2626'}33`
-                : '0 0 15px rgba(220,38,38,0.08)',
-            }}>
-              <svg viewBox="0 0 40 40" width="26" height="26" style={{
-                animation: `ah-core-spin ${isProcessing ? Math.max(0.4, 3 - avgSpeed * 0.4) + 's' : '12s'} linear infinite`,
-                animationPlayState: isProcessing ? 'running' : 'paused',
-              }}>
-                <defs>
-                  {[['r','#ef4444','#f97316'],['y','#f97316','#eab308'],['g','#eab308','#22c55e'],['c','#22c55e','#3b82f6'],['b','#3b82f6','#a855f7'],['p','#a855f7','#ef4444']].map(([id,a,b]) => (
-                    <linearGradient key={id} id={`ah-${id}`} x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stopColor={a}/><stop offset="100%" stopColor={b}/></linearGradient>
-                  ))}
-                </defs>
-                {[
-                  ['M20 4 A16 16 0 0 1 33.86 12','r'],['M33.86 12 A16 16 0 0 1 33.86 28','y'],
-                  ['M33.86 28 A16 16 0 0 1 20 36','g'],['M20 36 A16 16 0 0 1 6.14 28','c'],
-                  ['M6.14 28 A16 16 0 0 1 6.14 12','b'],['M6.14 12 A16 16 0 0 1 20 4','p'],
-                ].map(([d,id]) => (
-                  <path key={id} d={d} stroke={`url(#ah-${id})`} strokeWidth="3" fill="none" strokeLinecap="round" />
-                ))}
-                <circle cx="20" cy="20" r="3" fill="rgba(255,255,255,0.9)" />
-                <circle cx="20" cy="20" r="1.2" fill="rgba(220,38,38,0.8)" />
-              </svg>
-            </div>
-          </div>
-          {/* Speed label */}
-          <span className="mt-0.5 text-[9px] tracking-[0.12em] uppercase font-medium tabular-nums" style={{
-            color: isProcessing && avgSpeed > 0 ? 'rgba(34,197,94,0.6)' : 'rgba(255,255,255,0.2)',
-          }}>
-            {isProcessing && avgSpeed > 0 ? `${avgSpeed.toFixed(1)} img/s` : isProcessing ? 'Starting...' : 'AutoHue'}
-          </span>
-        </div>
-
-        {/* RIGHT: Output folder */}
-        <div className="absolute right-1 top-1/2 -translate-y-1/2 flex flex-col items-center gap-1 z-10">
-          <div className="w-11 h-11 rounded-xl border border-white/10 flex items-center justify-center bg-white/[0.02]" style={{
-            animation: dots.some(d => d.x > 95) ? 'ah-folder-bump 300ms ease-out' : 'none',
-          }}>
-            <svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-green-400/50">
-              <path d="M2 4.5C2 3.67 2.67 3 3.5 3H6L7.5 5H12.5C13.33 5 14 5.67 14 6.5V11.5C14 12.33 13.33 13 12.5 13H3.5C2.67 13 2 12.33 2 11.5V4.5Z" />
-            </svg>
-          </div>
-          <span className="text-[12px] text-green-400/80 font-bold tabular-nums">{totalProcessed ?? 0}</span>
-          <span className="text-[7px] text-white/20 tracking-widest uppercase">Sorted</span>
-        </div>
-
-        {/* ── Flying color dots ── */}
-        {dots.map(dot => {
-          const sw = COLOR_SWATCHES[dot.color] || '#94a3b8';
-          // Map 0-100 to actual pixel positions (left 14 to right 14 of container)
-          const leftPct = 6 + dot.x * 0.88; // 6% to 94%
-          const isNearCenter = dot.x > 38 && dot.x < 62;
-          const size = isNearCenter ? 10 : 7;
-          return (
-            <div key={dot.id} className="absolute top-1/2 -translate-y-1/2 rounded-full" style={{
-              left: `${leftPct}%`,
-              width: size,
-              height: size,
-              backgroundColor: sw,
-              boxShadow: isNearCenter ? `0 0 12px ${sw}88, 0 0 4px ${sw}44` : `0 0 6px ${sw}44`,
-              transition: 'width 150ms, height 150ms, box-shadow 150ms',
-              zIndex: isNearCenter ? 15 : 5,
-            }} />
-          );
-        })}
-      </div>
-
-      {/* ── Progress bar ── */}
-      {totalImages && totalImages > 0 && (
-        <div className="px-1">
-          <div className="w-full h-1.5 rounded-full bg-white/[0.04] overflow-hidden">
-            <div className="h-full rounded-full transition-all duration-500 ease-out" style={{
-              width: `${progress}%`,
-              background: progress >= 100 ? 'linear-gradient(90deg, #22c55e, #4ade80)' : 'linear-gradient(90deg, #dc2626, #ef4444)',
-            }} />
-          </div>
-        </div>
-      )}
-
-      {/* ── Color distribution feed ── */}
-      {recentColors.length > 0 && (
-        <div className="flex gap-0.5 overflow-hidden h-3 px-1">
-          {recentColors.slice(0, 40).map((r, i) => {
-            const sw = COLOR_SWATCHES[r.color] || '#94a3b8';
-            return (
-              <div key={r.id} className="shrink-0 rounded-sm" style={{
-                width: 6, height: 10,
-                backgroundColor: sw,
-                opacity: 1 - i * 0.02,
-                animation: i === 0 ? 'ah-dot-pop 150ms ease-out' : undefined,
-              }} />
-            );
-          })}
-        </div>
-      )}
-    </div>
+    <canvas
+      ref={canvasRef}
+      className="w-full"
+      style={{ height: 180, display: 'block' }}
+    />
   );
+}
+
+// ── Helpers ──
+function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.arcTo(x + w, y, x + w, y + r, r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+  ctx.lineTo(x + r, y + h);
+  ctx.arcTo(x, y + h, x, y + h - r, r);
+  ctx.lineTo(x, y + r);
+  ctx.arcTo(x, y, x + r, y, r);
+  ctx.closePath();
 }
