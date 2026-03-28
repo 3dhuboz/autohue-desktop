@@ -180,6 +180,7 @@ process.on('message', (msg) => {
 });
 
 const VALID_COLORS = new Set(['red','blue','green','yellow','orange','purple','pink','brown','black','white','silver-grey','cream','please-double-check']);
+const COLOR_LIST_STR = 'red, blue, green, yellow, orange, purple, pink, brown, black, white, silver-grey, cream';
 
 // Runtime string decode (IP protection)
 const _k = Buffer.from('614837236d4b392470    4c3221785234'.replace(/\s/g,''), 'hex');
@@ -407,7 +408,7 @@ async function classifyMiniBatch(imageBuffers, retries = 3) {
         }
         content.push({
             type: 'text',
-            text: `${imageBuffers.length} photos above. For each, reply with the car's BODY PAINT color. ${imageBuffers.length} lines, one word each from: red, blue, green, yellow, orange, purple, pink, brown, black, white, silver-grey. IGNORE backgrounds/grass/smoke/track. Dark charcoal/gunmetal/grey-green metallic/sage/olive = silver-grey. Gold/bronze = yellow. Only "green" for vivid bright green.`,
+            text: `${imageBuffers.length} photos above. For each, reply with the car's BODY PAINT color. ${imageBuffers.length} lines, one word each from: ${COLOR_LIST_STR}. IGNORE backgrounds/grass/smoke/track. Cream/beige/tan = cream. Dark charcoal/gunmetal = silver-grey. Grey-green metallic = silver-grey. Gold/bronze = yellow. Only "green" for vivid bright green.`,
         });
 
         const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -462,12 +463,12 @@ async function classifySingleImage(imageBuffer, retries = 3) {
             {
                 type: 'text',
                 text: SORT_BY_TYPE && DETECT_FEATURES
-                    ? 'Identify the main subject, its color, and any action feature. Reply with EXACTLY: TYPE COLOR FEATURE. TYPE: car, motorcycle, person, truck, other. COLOR: red, blue, green, yellow, orange, purple, pink, brown, black, white, silver-grey. FEATURE: burnout, wheelstand, flames, drift, launch, crash, none. Example: "car red burnout" or "motorcycle blue none" or "car white wheelstand". RULES: Pick the LARGEST subject. Dark charcoal/grey-green metallic = silver-grey. Only "green" for vivid bright green.'
+                    ? `Identify the main subject, its color, and any action feature. Reply with EXACTLY: TYPE COLOR FEATURE. TYPE: car, motorcycle, person, truck, other. COLOR: ${COLOR_LIST_STR}. FEATURE: burnout, wheelstand, flames, drift, launch, crash, none. Example: "car red burnout" or "motorcycle blue none". RULES: Pick the LARGEST subject. Cream/beige/tan/champagne = cream. Dark charcoal/gunmetal = silver-grey. Grey-green metallic = silver-grey. Gold/bronze = yellow. Only "green" for vivid bright green.`
                     : SORT_BY_TYPE
-                    ? 'Identify the main subject and its color. Reply with EXACTLY two words: TYPE COLOR. TYPE must be one of: car, motorcycle, person, truck, other. COLOR must be one of: red, blue, green, yellow, orange, purple, pink, brown, black, white, silver-grey. Example: "car white" or "motorcycle red" or "person black". RULES: Focus on the MAIN/LARGEST subject. Dark charcoal/gunmetal/grey-green metallic/sage/olive = silver-grey. Only "green" for vivid bright green. For people, use their clothing color.'
+                    ? `Identify the main subject and its color. Reply with EXACTLY two words: TYPE COLOR. TYPE: car, motorcycle, person, truck, other. COLOR: ${COLOR_LIST_STR}. Example: "car white" or "motorcycle red" or "person black". RULES: Focus on the LARGEST subject. Cream/beige/tan = cream. Dark charcoal/gunmetal = silver-grey. Grey-green metallic = silver-grey. Gold/bronze = yellow. Only "green" for vivid bright green. For people, use clothing color.`
                     : DETECT_FEATURES
-                    ? 'What is the BODY/PAINT color of the LARGEST car and any action feature? Reply with EXACTLY: COLOR FEATURE. COLOR: red, blue, green, yellow, orange, purple, pink, brown, black, white, silver-grey. FEATURE: burnout, wheelstand, flames, drift, launch, crash, none. Example: "red burnout" or "white none". RULES: Pick the BIGGEST car. Dark charcoal/grey-green = silver-grey. Only "green" for vivid bright green.'
-                    : 'What is the BODY/PAINT color of the MAIN SUBJECT car in this photo? Reply with ONLY one word from: red, blue, green, yellow, orange, purple, pink, brown, black, white, silver-grey, cream. RULES: The main subject is the car the photographer is FOCUSED ON — usually centered, in sharp focus, most prominent. IGNORE parked/background vehicles. Focus ONLY on subject car body paint. IGNORE smoke, sky, grass, barriers. Cream/beige/tan/champagne/sand = cream. Dark navy/midnight blue = blue. Dark charcoal/gunmetal = silver-grey. Grey-green metallic = silver-grey. Gold/bronze metallic = yellow. Only "green" for VIVID bright green. Only "yellow" for VIVID bright yellow. Multi-color/rat rod/patina cars with no clear dominant color = please-double-check.',
+                    ? `What is the BODY/PAINT color of the LARGEST car and any action feature? Reply with EXACTLY: COLOR FEATURE. COLOR: ${COLOR_LIST_STR}. FEATURE: burnout, wheelstand, flames, drift, launch, crash, none. Example: "red burnout" or "cream none". RULES: Pick the BIGGEST car. Cream/beige/tan = cream. Dark charcoal/gunmetal = silver-grey. Grey-green metallic = silver-grey. Gold/bronze = yellow. Only "green" for vivid bright green.`
+                    : `What is the BODY/PAINT color of the MAIN SUBJECT car in this photo? Reply with ONLY one word from: ${COLOR_LIST_STR}. RULES: The main subject is the car the photographer is FOCUSED ON — usually centered, in sharp focus, most prominent. IGNORE parked/background vehicles. Focus ONLY on subject car body paint. IGNORE smoke, sky, grass, barriers. Cream/beige/tan/champagne/sand = cream. Dark navy/midnight blue = blue. Dark charcoal/gunmetal = silver-grey. Grey-green metallic = silver-grey. Gold/bronze metallic = yellow. Only "green" for VIVID bright green. Only "yellow" for VIVID bright yellow. Multi-color/rat rod/patina cars with no clear dominant color = please-double-check.`,
             },
         ];
 
@@ -1925,9 +1926,16 @@ async function processSessionFiles(sessionId, files) {
         const thumbUrl = await generateThumb(filePath, sessionId, `${index}_${file}`);
 
         const needsReview = colorInfo.category === 'unknown' || colorInfo.confidence === 'none' || colorInfo.confidence === 'very-low';
-        const folderName = needsReview ? 'please-double-check' : colorInfo.category;
+        const colorName = needsReview ? 'please-double-check' : colorInfo.category;
 
-        const colorFolder = path.join(outputDir, folderName);
+        // Build folder path: with vehicle type subfolders if enabled
+        let colorFolder;
+        if (SORT_BY_TYPE && colorInfo.vehicleType) {
+            const typeFolder = TYPE_FOLDERS[colorInfo.vehicleType] || 'other';
+            colorFolder = path.join(outputDir, typeFolder, colorName);
+        } else {
+            colorFolder = path.join(outputDir, colorName);
+        }
         fs.mkdirSync(colorFolder, { recursive: true });
         let destName = file;
         let counter = 1;
@@ -1938,14 +1946,22 @@ async function processSessionFiles(sessionId, files) {
         }
         fs.copyFileSync(filePath, path.join(colorFolder, destName));
 
+        // Copy to _highlights folder if feature detected
+        if (DETECT_FEATURES && colorInfo.feature && colorInfo.feature !== 'none') {
+            const featureFolder = path.join(outputDir, '_highlights', colorInfo.feature);
+            fs.mkdirSync(featureFolder, { recursive: true });
+            try { fs.copyFileSync(filePath, path.join(featureFolder, file)); } catch {}
+        }
+
         completedCount++;
-        session.colorCounts[folderName] = (session.colorCounts[folderName] || 0) + 1;
+        session.colorCounts[colorName] = (session.colorCounts[colorName] || 0) + 1;
         session.currentFile = file;
         session.processed = completedCount;
 
         session.results.push({
-            filename: file, color: folderName, hex: colorInfo.hex, rgb: colorInfo.rgb,
+            filename: file, color: colorName, hex: colorInfo.hex, rgb: colorInfo.rgb,
             thumb: thumbUrl, confidence: colorInfo.confidence || 'unknown',
+            vehicleType: colorInfo.vehicleType || null, feature: colorInfo.feature || null,
             regions: colorInfo.regionsAgreeing ? `${colorInfo.regionsAgreeing}/${colorInfo.totalRegions}` : null,
             needsReview, originalColor: needsReview ? colorInfo.category : null,
             status: needsReview ? 'Needs Review' : 'Success'
@@ -2188,7 +2204,12 @@ app.post('/upload', (req, res) => {
 
 // ─── Sort-local endpoint (process images from a local directory) ───
 app.post('/sort-local', async (req, res) => {
-    const { inputPath, outputPath, maxImages } = req.body;
+    const { inputPath, outputPath, maxImages, sortByType, detectFeatures } = req.body;
+
+    // Set globals BEFORE processing begins (overrides any pending IPC)
+    if (sortByType !== undefined) SORT_BY_TYPE = !!sortByType;
+    if (detectFeatures !== undefined) DETECT_FEATURES = !!detectFeatures;
+    console.log(`[sort-local] Options: sortByType=${SORT_BY_TYPE}, detectFeatures=${DETECT_FEATURES}`);
 
     if (!inputPath) {
         return res.status(400).json({ error: 'inputPath is required' });

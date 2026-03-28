@@ -436,6 +436,10 @@ export default function SortPage() {
           setPaused(true);
         } else if (data.status === 'processing') {
           setPaused(false);
+          // Show bridge for non-archive files: processing started but no results yet
+          if ((data.processed || 0) === 0 && !extractionPhase.active && !preClassifyBridge) {
+            setPreClassifyBridge(true);
+          }
           // Update total when transitioning from extracting to processing
           if (data.total && data.total > 0) {
             setStats(prev => ({ ...prev, total: data.total, extracted: data.extracted || prev.extracted }));
@@ -533,7 +537,7 @@ export default function SortPage() {
       } catch (e) {
         console.error('Polling error:', e);
       }
-    }, 1500);
+    }, 800);
   };
 
   const reassignImage = async (filename: string, fromFolder: string, toFolder: string) => {
@@ -1076,13 +1080,13 @@ export default function SortPage() {
                   </div>
                 </div>
                 <h3 className="text-lg font-heading font-bold text-racing-400 mb-2">
-                  Initializing AI Engine
+                  Preparing AI Pipeline
                 </h3>
                 <p className="text-white/40 text-sm mb-1">
-                  {stats.total > 0 ? `${stats.total.toLocaleString()} images ready` : 'Images loaded'} — preparing color classification pipeline
+                  {stats.total > 0 ? `${stats.total.toLocaleString()} images queued` : 'Scanning images'} — connecting to AI vision engine
                 </p>
                 <p className="text-white/20 text-xs mb-5">
-                  Loading ONNX models and CIE LAB color space...
+                  First results appear in a few seconds...
                 </p>
                 <div className="max-w-xs mx-auto">
                   <div className="w-full h-2 bg-white/5 rounded-full overflow-hidden">

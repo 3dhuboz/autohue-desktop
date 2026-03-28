@@ -27,6 +27,7 @@ interface Particle {
   id: number;
   color: string;
   hex: string;
+  filename: string;
   x: number;
   y: number;
   targetX: number;
@@ -37,6 +38,7 @@ interface Particle {
   bucketIdx: number;
   speed: number;
   trail: { x: number; y: number }[];
+  img: HTMLImageElement | null;
 }
 
 // Bucket accumulator
@@ -47,7 +49,7 @@ interface Bucket {
   flashTimer: number;
 }
 
-const MAX_PARTICLES = 60;
+const MAX_PARTICLES = 35;
 const BUCKET_COLORS = ['red', 'blue', 'green', 'yellow', 'orange', 'purple', 'pink', 'brown', 'black', 'white', 'silver-grey', 'cream'];
 
 export default function SortAnimation({ results, isProcessing, totalProcessed, totalImages }: SortAnimationProps) {
@@ -123,20 +125,30 @@ export default function SortAnimation({ results, isProcessing, totalProcessed, t
       const bucket = s.buckets.get(item.color)!;
       const bucketIdx = activeBuckets.indexOf(bucket);
 
+      // Load thumbnail if available
+      let img: HTMLImageElement | null = null;
+      if (item.thumb) {
+        img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.src = item.thumb;
+      }
+
       s.particles.push({
         id: s.nextId++,
         color: item.color,
         hex,
+        filename: item.filename,
         x: funnelX - 10,
-        y: centerY + (Math.random() - 0.5) * 20,
+        y: centerY + (Math.random() - 0.5) * 16,
         targetX: 0,
         targetY: 0,
-        size: 5 + Math.random() * 3,
+        size: 18 + Math.random() * 6,
         opacity: 0,
         phase: 'enter',
         bucketIdx: Math.max(0, bucketIdx),
         speed: 0.15 + Math.random() * 0.1,
         trail: [],
+        img,
       });
     }
 
@@ -350,24 +362,46 @@ export default function SortAnimation({ results, isProcessing, totalProcessed, t
         for (let t = 1; t < p.trail.length; t++) {
           ctx.lineTo(p.trail[t].x, p.trail[t].y);
         }
-        ctx.strokeStyle = p.hex + '20';
-        ctx.lineWidth = p.size * 0.5;
+        ctx.strokeStyle = p.hex + '15';
+        ctx.lineWidth = p.size * 0.3;
         ctx.stroke();
       }
 
-      // Draw particle
+      // Draw particle as color card
       if (p.opacity > 0) {
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, p.size / 2, 0, Math.PI * 2);
-        ctx.fillStyle = p.hex;
+        const cardW = p.size * 1.6;
+        const cardH = p.size;
         ctx.globalAlpha = p.opacity;
-        ctx.fill();
 
-        // Glow
-        if (p.phase === 'travel' && p.x > engineX - 8 && p.x < engineX + 8) {
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-          ctx.fillStyle = p.hex + '44';
+        // Try to draw thumbnail
+        if (p.img && p.img.complete && p.img.naturalWidth > 0) {
+          ctx.save();
+          roundRect(ctx, p.x - cardW / 2, p.y - cardH / 2, cardW, cardH, 3);
+          ctx.clip();
+          ctx.drawImage(p.img, p.x - cardW / 2, p.y - cardH / 2, cardW, cardH);
+          ctx.restore();
+          // Color border
+          ctx.strokeStyle = p.hex;
+          ctx.lineWidth = 1.5;
+          roundRect(ctx, p.x - cardW / 2, p.y - cardH / 2, cardW, cardH, 3);
+          ctx.stroke();
+        } else {
+          // Solid color card fallback
+          ctx.fillStyle = p.hex;
+          roundRect(ctx, p.x - cardW / 2, p.y - cardH / 2, cardW, cardH, 3);
+          ctx.fill();
+          // Filename text
+          ctx.fillStyle = 'rgba(255,255,255,0.85)';
+          ctx.font = '500 6px "Outfit", sans-serif';
+          ctx.textAlign = 'center';
+          const shortName = p.filename.length > 10 ? p.filename.slice(0, 9) + '…' : p.filename;
+          ctx.fillText(shortName, p.x, p.y + 2);
+        }
+
+        // Glow when passing through engine
+        if (p.phase === 'travel' && p.x > engineX - 12 && p.x < engineX + 12) {
+          ctx.fillStyle = p.hex + '30';
+          roundRect(ctx, p.x - cardW / 2 - 3, p.y - cardH / 2 - 3, cardW + 6, cardH + 6, 5);
           ctx.fill();
         }
         ctx.globalAlpha = 1;

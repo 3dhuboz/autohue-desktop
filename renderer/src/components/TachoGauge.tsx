@@ -22,7 +22,7 @@ export default function TachoGauge({
   useEffect(() => {
     const start = prevValue.current;
     const end = Math.min(Math.max(value, 0), 100);
-    const duration = 1200;
+    const duration = 750;
     const startTime = performance.now();
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     const animate = (now: number) => {
