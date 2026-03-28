@@ -664,22 +664,38 @@ const SEG_SIZE = 384; // 384 balances accuracy and speed (was 256, ~2x slower bu
 let segInputBuffer = null;
 
 async function loadModel() {
-    // Load SSD-MobileNet (bounding box detection)
+    // Skip model loading entirely when API vision is available (OpenRouter/Claude)
+    // Models are only needed for the local fallback pipeline
+    const engine = getActiveEngine();
+    if (engine !== 'local') {
+        console.log(`[models] Skipping ONNX model loading — using ${engine} vision API`);
+        return;
+    }
+
+    // Load SSD-MobileNet (bounding box detection) with timeout
     try {
-        onnxSession = await ort.InferenceSession.create(SSD_MODEL_PATH, {
+        const ssdPromise = ort.InferenceSession.create(SSD_MODEL_PATH, {
             executionProviders: ['cpu'],
         });
+        onnxSession = await Promise.race([
+            ssdPromise,
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout after 15s')), 15000)),
+        ]);
         console.log('ONNX SSD-MobileNet loaded successfully');
     } catch (err) {
         console.error('Failed to load SSD-MobileNet:', err.message);
     }
 
-    // Load SegFormer (pixel-level vehicle segmentation)
+    // Load SegFormer (pixel-level vehicle segmentation) with timeout
     try {
         if (fs.existsSync(SEGFORMER_MODEL_PATH)) {
-            segformerSession = await ort.InferenceSession.create(SEGFORMER_MODEL_PATH, {
+            const segPromise = ort.InferenceSession.create(SEGFORMER_MODEL_PATH, {
                 executionProviders: ['cpu'],
             });
+            segformerSession = await Promise.race([
+                segPromise,
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout after 15s')), 15000)),
+            ]);
             console.log('SegFormer segmentation model loaded successfully');
         } else {
             console.warn('SegFormer model not found at:', SEGFORMER_MODEL_PATH);

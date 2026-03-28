@@ -961,7 +961,7 @@ export default function SortPage() {
             </div>
 
             {/* ── Extraction Phase UI — show when no images classified yet ── */}
-            {stats.processed === 0 && phase === 'processing' && (
+            {stats.processed === 0 && phase === 'processing' && !paused && (
               <div className="glass-card rounded-3xl p-8 text-center animate-fade-up">
                 {/* Big animated archive icon */}
                 <div className="relative inline-flex items-center justify-center mb-6">
