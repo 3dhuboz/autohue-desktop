@@ -41,19 +41,110 @@ async function checkForUpdates() {
       type: 'info',
       title: 'Update Available',
       message: `AutoHue v${latestVersion} is available`,
-      detail: `You're running v${currentVersion}. Download the latest version (${sizeMB} MB)?`,
-      buttons: ['Download Update', 'Later'],
+      detail: `You're running v${currentVersion}. Download v${latestVersion} (${sizeMB} MB)?\n\nThe update will download and install automatically.`,
+      buttons: ['Update Now', 'Later'],
       defaultId: 0,
       cancelId: 1,
     });
 
     if (result.response === 0) {
-      // Open download URL in browser — R2 serves the file
-      shell.openExternal(`${API_BASE}/api/download/latest/${platform}`);
+      downloadAndInstallUpdate(latestVersion, platform);
     }
   } catch (err) {
     console.error('[update-check] Failed:', err.message);
   }
+}
+
+function downloadAndInstallUpdate(version, platform) {
+  const downloadUrl = `${API_BASE}/api/download/latest/${platform}`;
+  const fs = require('fs');
+  const { spawn } = require('child_process');
+  const tmpPath = path.join(app.getPath('temp'), `AutoHue-Setup-${version}.exe`);
+
+  // Show progress in a new window
+  const progressWin = new BrowserWindow({
+    width: 420, height: 180, resizable: false, frame: false,
+    alwaysOnTop: true, backgroundColor: '#09090b',
+    webPreferences: { nodeIntegration: false, contextIsolation: true },
+  });
+
+  progressWin.loadURL(`data:text/html,${encodeURIComponent(`
+    <!DOCTYPE html><html><head><style>
+      body { margin:0; padding:24px; background:#09090b; color:#fff; font-family:system-ui; display:flex; flex-direction:column; justify-content:center; }
+      h3 { margin:0 0 8px; font-size:14px; font-weight:600; }
+      .bar { height:6px; background:#1a1a2e; border-radius:3px; overflow:hidden; margin:8px 0; }
+      .fill { height:100%; background:linear-gradient(90deg,#dc2626,#ef4444); border-radius:3px; transition:width 0.3s; }
+      .info { font-size:11px; color:rgba(255,255,255,0.4); }
+    </style></head><body>
+      <h3 id="title">Downloading AutoHue v${version}...</h3>
+      <div class="bar"><div class="fill" id="bar" style="width:0%"></div></div>
+      <div class="info" id="info">Starting download...</div>
+    </body></html>
+  `)}`);
+
+  // Download using Electron's net module for progress tracking
+  const { net } = require('electron');
+  const request = net.request(downloadUrl);
+  let received = 0;
+  let totalSize = 0;
+  const chunks = [];
+
+  request.on('response', (response) => {
+    totalSize = parseInt(response.headers['content-length'] || '0', 10);
+
+    response.on('data', (chunk) => {
+      chunks.push(chunk);
+      received += chunk.length;
+      const pct = totalSize > 0 ? Math.round((received / totalSize) * 100) : 0;
+      const mb = (received / 1024 / 1024).toFixed(1);
+      const totalMb = (totalSize / 1024 / 1024).toFixed(0);
+      if (!progressWin.isDestroyed()) {
+        progressWin.webContents.executeJavaScript(`
+          document.getElementById('bar').style.width='${pct}%';
+          document.getElementById('info').textContent='${mb} / ${totalMb} MB (${pct}%)';
+        `).catch(() => {});
+      }
+    });
+
+    response.on('end', () => {
+      try {
+        const buffer = Buffer.concat(chunks);
+        fs.writeFileSync(tmpPath, buffer);
+
+        if (!progressWin.isDestroyed()) {
+          progressWin.webContents.executeJavaScript(`
+            document.getElementById('title').textContent='Installing...';
+            document.getElementById('info').textContent='Launching installer — the app will restart.';
+            document.getElementById('bar').style.width='100%';
+            document.getElementById('bar').style.background='linear-gradient(90deg,#22c55e,#4ade80)';
+          `).catch(() => {});
+        }
+
+        // Launch installer and quit
+        setTimeout(() => {
+          spawn(tmpPath, ['/S'], { detached: true, stdio: 'ignore' }).unref();
+          app.quit();
+        }, 1500);
+      } catch (err) {
+        console.error('[update] Failed to save:', err.message);
+        if (!progressWin.isDestroyed()) progressWin.close();
+        dialog.showErrorBox('Update Failed', 'Could not save the update file. Please download manually from autohue.app/download');
+      }
+    });
+
+    response.on('error', (err) => {
+      console.error('[update] Download error:', err.message);
+      if (!progressWin.isDestroyed()) progressWin.close();
+      dialog.showErrorBox('Update Failed', 'Download failed. Please try again later.');
+    });
+  });
+
+  request.on('error', (err) => {
+    console.error('[update] Request error:', err.message);
+    if (!progressWin.isDestroyed()) progressWin.close();
+  });
+
+  request.end();
 }
 
 function createWindow() {
