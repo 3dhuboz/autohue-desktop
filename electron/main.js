@@ -13,6 +13,48 @@ let workerManager;
 let rulesSync;
 
 const isDev = !app.isPackaged;
+const API_BASE = 'https://autohue-api.steve-700.workers.dev';
+
+async function checkForUpdates() {
+  try {
+    const currentVersion = app.getVersion();
+    const res = await fetch(`${API_BASE}/api/releases/latest`);
+    if (!res.ok) return;
+    const data = await res.json();
+    const latestVersion = data.version;
+
+    if (!latestVersion || latestVersion === currentVersion) return;
+
+    // Compare semver: only prompt if latest > current
+    const current = currentVersion.split('.').map(Number);
+    const latest = latestVersion.split('.').map(Number);
+    const isNewer = latest[0] > current[0]
+      || (latest[0] === current[0] && latest[1] > current[1])
+      || (latest[0] === current[0] && latest[1] === current[1] && latest[2] > current[2]);
+    if (!isNewer) return;
+
+    const platform = process.platform === 'darwin' ? 'mac' : 'windows';
+    const fileInfo = platform === 'mac' ? data.mac : data.windows;
+    const sizeMB = fileInfo ? (fileInfo.size / 1024 / 1024).toFixed(0) : '?';
+
+    const result = await dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      title: 'Update Available',
+      message: `AutoHue v${latestVersion} is available`,
+      detail: `You're running v${currentVersion}. Download the latest version (${sizeMB} MB)?`,
+      buttons: ['Download Update', 'Later'],
+      defaultId: 0,
+      cancelId: 1,
+    });
+
+    if (result.response === 0) {
+      // Open download URL in browser — R2 serves the file
+      shell.openExternal(`${API_BASE}/api/download/latest/${platform}`);
+    }
+  } catch (err) {
+    console.error('[update-check] Failed:', err.message);
+  }
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -218,14 +260,9 @@ app.whenReady().then(async () => {
     console.warn('[tray] Failed to create:', err.message);
   }
 
-  // 6. Check for updates (production only)
+  // 6. Check for updates via R2 API (production only)
   if (!isDev) {
-    try {
-      const { autoUpdater } = require('electron-updater');
-      autoUpdater.checkForUpdatesAndNotify();
-    } catch (err) {
-      console.error('Auto-updater error:', err.message);
-    }
+    checkForUpdates();
   }
 
   // 7. Start rules sync — checks cloud for updated learned rules every 6 hours
