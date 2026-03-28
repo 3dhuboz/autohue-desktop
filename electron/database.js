@@ -122,7 +122,11 @@ class DatabaseWrapper {
 async function initDatabase(dbPath) {
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 
-  const SQL = await initSqlJs();
+  // Point sql.js to the unpacked WASM file (asar can't serve binary files)
+  const sqlJsDir = path.dirname(require.resolve('sql.js')).replace('app.asar', 'app.asar.unpacked');
+  const SQL = await initSqlJs({
+    locateFile: (file) => path.join(sqlJsDir, file),
+  });
 
   let sqlDb;
   if (fs.existsSync(dbPath)) {
