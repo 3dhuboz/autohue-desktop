@@ -433,6 +433,13 @@ export default function SettingsPage({ license, onRefresh }: Props) {
               const next = current === 'true' ? 'false' : 'true';
               await window.electronAPI.setSetting('sort_by_type', next);
               setSortByType(next === 'true');
+              // Verify worker received it
+              setTimeout(async () => {
+                try {
+                  const h = await fetch(`http://127.0.0.1:${port}/health`).then(r => r.json());
+                  showToast(`Vehicle type sorting: ${h.sortByType ? 'ON' : 'OFF'} (worker confirmed)`, h.sortByType === (next === 'true') ? 'success' : 'error');
+                } catch { showToast(`Vehicle type sorting: ${next === 'true' ? 'ON' : 'OFF'}`, 'info'); }
+              }, 500);
             }}
             className={`relative w-11 h-6 rounded-full transition-colors ${sortByType ? 'bg-racing-500' : 'bg-white/10'}`}
           >
@@ -451,6 +458,12 @@ export default function SettingsPage({ license, onRefresh }: Props) {
               const next = current === 'true' ? 'false' : 'true';
               await window.electronAPI.setSetting('detect_features', next);
               setDetectFeatures(next === 'true');
+              setTimeout(async () => {
+                try {
+                  const h = await fetch(`http://127.0.0.1:${port}/health`).then(r => r.json());
+                  showToast(`Feature detection: ${h.detectFeatures ? 'ON' : 'OFF'} (worker confirmed)`, h.detectFeatures === (next === 'true') ? 'success' : 'error');
+                } catch { showToast(`Feature detection: ${next === 'true' ? 'ON' : 'OFF'}`, 'info'); }
+              }, 500);
             }}
             className={`relative w-11 h-6 rounded-full transition-colors ${detectFeatures ? 'bg-racing-500' : 'bg-white/10'}`}
           >

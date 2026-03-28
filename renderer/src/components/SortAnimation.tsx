@@ -31,6 +31,7 @@ interface Particle {
   speed: number;
   img: HTMLImageElement | null;
   landed: boolean;
+  ghost: boolean; // interpolated particle — don't count in buckets
 }
 
 interface Bucket {
@@ -55,6 +56,8 @@ export default function SortAnimation({ results, isProcessing, totalProcessed, t
     spawnTimer: 0,
     engineAngle: 0,
     pulsePhase: 0,
+    avgSpawnRate: 100, // ms between spawns, adapts to processing speed
+    lastSpawnColors: [] as string[], // recent colors for interpolated spawning
   });
 
   // Enqueue new results
@@ -106,21 +109,45 @@ export default function SortAnimation({ results, isProcessing, totalProcessed, t
     const activeBuckets = Array.from(s.buckets.values()).sort((a, b) => b.count - a.count);
     const bSpacing = Math.min(28, (H - 16) / Math.max(activeBuckets.length, 1));
 
-    // ── Spawn ──
-    const spawnRate = s.pending.length > 20 ? 40 : s.pending.length > 5 ? 80 : 140;
+    // ── Spawn — constant rate based on average speed ──
+    // Adapt spawn rate: when pending items exist, drain them; otherwise interpolate
+    if (s.pending.length > 0) {
+      // Track colors for interpolation
+      s.lastSpawnColors = s.pending.slice(0, 10).map(p => p.color);
+      // Adaptive drain rate based on queue depth
+      s.avgSpawnRate = s.pending.length > 20 ? 40 : s.pending.length > 5 ? 80 : 120;
+    }
+
     s.spawnTimer += dt;
-    while (s.spawnTimer >= spawnRate && s.pending.length > 0 && s.particles.length < MAX_PARTICLES) {
-      s.spawnTimer -= spawnRate;
-      const item = s.pending.shift()!;
-      const hex = COLOR_HEX[item.color] || '#94a3b8';
-      if (!s.buckets.has(item.color)) s.buckets.set(item.color, { color: item.color, hex, count: 0, flash: 0 });
-      const bIdx = activeBuckets.findIndex(b => b.color === item.color);
+    const effectiveRate = s.avgSpawnRate;
+
+    while (s.spawnTimer >= effectiveRate && s.particles.length < MAX_PARTICLES) {
+      s.spawnTimer -= effectiveRate;
+
+      let color: string, hex: string, filename: string;
       let img: HTMLImageElement | null = null;
-      if (item.thumb) { img = new Image(); img.crossOrigin = 'anonymous'; img.src = item.thumb; }
+
+      if (s.pending.length > 0) {
+        // Real data available
+        const item = s.pending.shift()!;
+        color = item.color; hex = COLOR_HEX[color] || '#94a3b8'; filename = item.filename;
+        if (item.thumb) { img = new Image(); img.crossOrigin = 'anonymous'; img.src = item.thumb; }
+      } else if (isProcessing && s.lastSpawnColors.length > 0) {
+        // No pending data — interpolate using recent colors for smooth flow
+        color = s.lastSpawnColors[Math.floor(Math.random() * s.lastSpawnColors.length)];
+        hex = COLOR_HEX[color] || '#94a3b8';
+        filename = '';
+      } else {
+        break; // Nothing to spawn
+      }
+
+      const isGhost = s.pending.length === 0 && filename === '';
+      if (!s.buckets.has(color)) s.buckets.set(color, { color, hex, count: 0, flash: 0 });
+      const bIdx = activeBuckets.findIndex(b => b.color === color);
       s.particles.push({
-        id: s.nextId++, color: item.color, hex, filename: item.filename,
+        id: s.nextId++, color, hex, filename,
         progress: 0, opacity: 0, bucketIdx: Math.max(0, bIdx),
-        speed: 0.0008 + Math.random() * 0.0004, img, landed: false,
+        speed: 0.0008 + Math.random() * 0.0004, img, landed: false, ghost: isGhost,
       });
     }
 
@@ -238,8 +265,10 @@ export default function SortAnimation({ results, isProcessing, totalProcessed, t
 
       if (p.progress >= 1 && !p.landed) {
         p.landed = true;
-        const bucket = s.buckets.get(p.color);
-        if (bucket) { bucket.count++; bucket.flash = 1; }
+        if (!p.ghost) {
+          const bucket = s.buckets.get(p.color);
+          if (bucket) { bucket.count++; bucket.flash = 1; }
+        }
       }
       if (p.progress >= 1.1) { toRemove.push(i); continue; }
 
@@ -319,7 +348,7 @@ export default function SortAnimation({ results, isProcessing, totalProcessed, t
     return () => cancelAnimationFrame(stateRef.current.animId);
   }, [render]);
 
-  return <canvas ref={canvasRef} className="w-full" style={{ height: 170, display: 'block' }} />;
+  return <canvas ref={canvasRef} className="w-full" style={{ height: 140, display: 'block' }} />;
 }
 
 function rr(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {

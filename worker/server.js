@@ -535,6 +535,9 @@ async function classifySingleImage(imageBuffer, retries = 3) {
             const result = { category: mappedColor, confidence: 0.95, method: 'openrouter' };
             if (SORT_BY_TYPE) result.vehicleType = type;
             if (DETECT_FEATURES && feature !== 'none') result.feature = feature;
+            if ((SORT_BY_TYPE || DETECT_FEATURES) && lines.length > 0) {
+                console.log(`[vision] "${rawText.replace(/\n/g, '\\n')}" → color=${mappedColor} type=${type} feature=${feature} (SORT_BY_TYPE=${SORT_BY_TYPE} DETECT_FEATURES=${DETECT_FEATURES})`);
+            }
             return result;
         }
 
@@ -2881,6 +2884,8 @@ app.get('/health', (req, res) => {
         uptime: Math.round(process.uptime()) + 's',
         nyckelConfigured: !!(NYCKEL_CLIENT_ID && NYCKEL_CLIENT_SECRET),
         activeSessions: Object.keys(sessions).length,
+        sortByType: SORT_BY_TYPE,
+        detectFeatures: DETECT_FEATURES,
     });
 });
 
