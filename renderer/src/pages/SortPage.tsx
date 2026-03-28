@@ -998,45 +998,37 @@ export default function SortPage() {
 
             {/* ── Extraction Phase UI — show when no images classified yet ── */}
             {stats.processed === 0 && phase === 'processing' && !paused && (
-              <div className="glass-card rounded-3xl p-8 text-center animate-fade-up">
-                {/* Big animated archive icon */}
-                <div className="relative inline-flex items-center justify-center mb-6">
-                  <div className="w-24 h-24 rounded-2xl bg-gradient-to-br from-amber-500/20 to-orange-600/20 border border-amber-500/30 flex items-center justify-center" style={{ animation: 'pulse 2s ease-in-out infinite' }}>
-                    <svg viewBox="0 0 24 24" width={40} height={40} fill="none" stroke="currentColor" strokeWidth="1.5" className="text-amber-400">
+              <div className="glass-card rounded-2xl p-5 text-center animate-fade-up">
+                {/* Compact archive icon */}
+                <div className="relative inline-flex items-center justify-center mb-3">
+                  <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-amber-500/15 to-orange-600/15 border border-amber-500/25 flex items-center justify-center" style={{ animation: 'pulse 2s ease-in-out infinite' }}>
+                    <svg viewBox="0 0 24 24" width={24} height={24} fill="none" stroke="currentColor" strokeWidth="1.5" className="text-amber-400">
                       <path d="M21 8v13H3V8M1 3h22v5H1z" /><path d="M10 12h4" />
                     </svg>
                   </div>
-                  {/* Flying files animation */}
-                  {[0,1,2,3,4].map(i => (
-                    <div key={i} className="absolute w-3 h-4 rounded-sm bg-amber-400/40" style={{
-                      animation: `extract-fly 1.5s ease-out ${i * 0.3}s infinite`,
-                      top: '20%', left: '60%',
+                  {[0,1,2].map(i => (
+                    <div key={i} className="absolute w-2 h-3 rounded-sm bg-amber-400/30" style={{
+                      animation: `extract-fly 1.5s ease-out ${i * 0.4}s infinite`,
+                      top: '15%', left: '55%',
                     }} />
                   ))}
                 </div>
 
-                <h3 className="text-xl font-heading font-bold text-amber-400 mb-2">
-                  Unpacking Your Archive
+                <h3 className="text-base font-heading font-bold text-amber-400 mb-1">
+                  Unpacking Archive
                 </h3>
-                <p className="text-white/40 text-sm mb-1">
+                <p className="text-white/30 text-xs mb-3">
                   {extractionPhase.total > 0
-                    ? `Found ${extractionPhase.total.toLocaleString()} images — extracting to temporary storage`
-                    : 'Scanning archive and extracting images...'
+                    ? `${extractionPhase.extracted.toLocaleString()} of ${extractionPhase.total.toLocaleString()} images extracted`
+                    : 'Scanning archive...'
                   }
                 </p>
-                <p className="text-white/20 text-xs mb-6">
-                  Larger files take longer to extract. Classification begins once extraction is complete.
-                </p>
 
-                {/* Big extraction progress */}
-                <div className="max-w-lg mx-auto mb-4">
-                  <div className="flex justify-between text-xs text-white/40 mb-2">
-                    <span>{extractionPhase.extracted.toLocaleString()} extracted</span>
-                    <span>{extractionPhase.total > 0 ? `${extractionPhase.total.toLocaleString()} total` : 'scanning...'}</span>
-                  </div>
-                  <div className="w-full h-3 bg-white/5 rounded-full overflow-hidden">
+                {/* Extraction progress bar */}
+                <div className="max-w-md mx-auto mb-2">
+                  <div className="w-full h-2 bg-white/5 rounded-full overflow-hidden">
                     <div
-                      className="h-full rounded-full transition-all duration-500 ease-out"
+                      className="h-full rounded-full transition-all duration-700 ease-out"
                       style={{
                         width: extractionPhase.total > 0 ? `${Math.min((extractionPhase.extracted / extractionPhase.total) * 100, 100)}%` : '30%',
                         background: 'linear-gradient(90deg, #f59e0b, #f97316, #ef4444)',
@@ -1045,8 +1037,7 @@ export default function SortPage() {
                     />
                   </div>
                 </div>
-
-                <p className="text-[10px] text-white/15 truncate max-w-md mx-auto">{extractionPhase.currentFile}</p>
+                <p className="text-[9px] text-white/15 truncate max-w-sm mx-auto">{extractionPhase.currentFile}</p>
 
                 <style>{`
                   @keyframes extract-fly {
@@ -1133,16 +1124,12 @@ export default function SortPage() {
             </div>
 
             {/* Progress bar */}
-            <div className="glass-card rounded-2xl p-3 space-y-2">
+            <div className={`glass-card rounded-2xl p-3 space-y-2 ${stats.processed === 0 && phase === 'processing' ? 'hidden' : ''}`}>
               <div className="flex items-center justify-between text-sm">
                 <span className="text-white/50 flex items-center gap-2">
                   {!paused && <SpinnerIcon size={14} className="text-racing-500" />}
                   {paused && <span className="w-3.5 h-3.5 rounded-full bg-amber-500/50" />}
-                  {stats.processed === 0 && stats.extracted > 0
-                    ? <span className="text-green-400 font-bold">Extracting archive — {stats.extracted} of {stats.total || '?'} images</span>
-                    : stats.processed === 0 && stats.total === 0
-                    ? <span className="text-amber-400/80">Scanning archive...</span>
-                    : stats.currentFile ? `Classifying: ${stats.currentFile}` : 'Classifying...'
+                  {stats.currentFile ? `Classifying: ${stats.currentFile}` : 'Classifying...'
                   }
                 </span>
                 <span className="digital-readout text-white/60 text-lg font-bold">
@@ -1167,7 +1154,7 @@ export default function SortPage() {
             </div>
 
             {/* Sorting Animation */}
-            <div className="glass-card rounded-2xl p-3 overflow-hidden">
+            <div className={`glass-card rounded-2xl p-3 overflow-hidden ${stats.processed === 0 && phase === 'processing' ? 'hidden' : ''}`}>
               <SortAnimation
                 results={stats.results.map(r => ({
                   filename: r.file || r.filename || '',
@@ -1181,7 +1168,7 @@ export default function SortPage() {
             </div>
 
             {/* Pipeline visualization */}
-            <div className="glass-card rounded-2xl p-4 relative overflow-hidden">
+            <div className={`glass-card rounded-2xl p-4 relative overflow-hidden ${stats.processed === 0 && phase === 'processing' ? 'hidden' : ''}`}>
               <style>{`
                 @keyframes pipeline-flow { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
                 .pipe-flow { background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.08) 50%, transparent 100%); background-size: 200% 100%; animation: pipeline-flow 1.5s linear infinite; }
