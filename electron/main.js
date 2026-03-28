@@ -120,16 +120,18 @@ function downloadAndInstallUpdate(version, platform) {
           `).catch(() => {});
         }
 
-        // Launch installer then relaunch app via a helper batch script
+        // Launch installer then relaunch app via helper batch script
         setTimeout(() => {
           const fs = require('fs');
           const exePath = path.join(process.env.LOCALAPPDATA || '', 'Programs', 'autohue-desktop', 'AutoHue.exe');
           const batPath = path.join(app.getPath('temp'), 'autohue-update.bat');
-          // Batch script: wait for installer, then launch app
+          // Batch: run installer, poll until exe exists and is unlocked, then launch
           fs.writeFileSync(batPath, [
             '@echo off',
-            `start /wait "" "${tmpPath}" /S`,
-            'timeout /t 2 /nobreak >nul',
+            `"${tmpPath}" /S`,
+            'ping -n 8 127.0.0.1 >nul',
+            `:wait`,
+            `if not exist "${exePath}" (ping -n 3 127.0.0.1 >nul & goto wait)`,
             `start "" "${exePath}"`,
             `del "%~f0"`,
           ].join('\r\n'));
