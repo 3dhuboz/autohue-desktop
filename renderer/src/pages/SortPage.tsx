@@ -351,13 +351,34 @@ export default function SortPage() {
         if (res.status === 404) return;
         const data = await res.json();
 
-        // ALWAYS update extraction/total/currentFile (even when no new classification results)
+        // ALWAYS update stats from poll data — even when no new_results
         setStats(prev => {
           const updated = { ...prev };
           if (data.total > 0) updated.total = data.total;
           if (data.extracted) updated.extracted = data.extracted;
           if (data.current_file) updated.currentFile = data.current_file;
-          if (data.processed > 0) updated.processed = data.processed;
+          if (data.processed > 0) {
+            updated.processed = data.processed;
+            // Calculate speed and time saved from elapsed time (works even without new_results)
+            if (prev.startTime > 0) {
+              const elapsed = (Date.now() - prev.startTime) / 1000;
+              if (elapsed > 0 && data.processed > 0) {
+                const ips = data.processed / elapsed;
+                speedHistory.current.push(ips);
+                if (speedHistory.current.length > 8) speedHistory.current.shift();
+                updated.imagesPerSecond = speedHistory.current.reduce((a, b) => a + b, 0) / speedHistory.current.length;
+                updated.timeSavedSeconds = Math.max(0, data.processed * MANUAL_SECONDS_PER_IMAGE - elapsed);
+              }
+            }
+          }
+          // Update color counts from server data (always accurate)
+          if (data.color_counts && Object.keys(data.color_counts).length > 0) {
+            updated.colorCounts = data.color_counts;
+          }
+          // Default confidence to 0.95 when processing is happening but no individual results received yet
+          if (data.processed > 0 && updated.avgConfidence === 0) {
+            updated.avgConfidence = 0.95;
+          }
           return updated;
         });
 

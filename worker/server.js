@@ -463,7 +463,7 @@ async function classifySingleImage(imageBuffer, retries = 3) {
             {
                 type: 'text',
                 // ALWAYS use high-accuracy color-only prompt. Type/feature detected separately below.
-                text: `What is the BODY/PAINT color of the MAIN SUBJECT car in this photo? Reply with ONLY one word from: ${COLOR_LIST_STR}. RULES: The main subject is the car the photographer is FOCUSED ON — usually centered, in sharp focus, most prominent. IGNORE parked/background vehicles. Focus ONLY on subject car body paint. IGNORE smoke, sky, grass, barriers. Cream/beige/tan/champagne/sand = cream. Dark navy/midnight blue = blue. Dark charcoal/gunmetal = silver-grey. Grey-green metallic = silver-grey. Gold/bronze metallic = yellow. Only "green" for VIVID bright green. Only "yellow" for VIVID bright yellow. Multi-color/rat rod/patina cars with no clear dominant color = please-double-check.`
+                text: `What is the BODY/PAINT color of the MAIN SUBJECT car in this photo? Reply with ONLY one word from: ${COLOR_LIST_STR}. RULES: The main subject is the car the photographer is FOCUSED ON — usually centered, in sharp focus, most prominent. IGNORE parked/background vehicles. Focus ONLY on subject car body paint. IGNORE smoke, sky, grass, barriers. Cream/beige/tan/champagne/sand/gold metallic/rose gold/bronze metallic = cream. Dark navy/midnight blue = blue. Dark charcoal/gunmetal = silver-grey. Grey-green metallic = silver-grey. Gold/bronze metallic = yellow. Only "green" for VIVID bright green. Only "yellow" for VIVID bright yellow. Multi-color/rat rod/patina cars with no clear dominant color = please-double-check.`
                 + ((SORT_BY_TYPE || DETECT_FEATURES) ? ` Also on a SECOND line reply with:${SORT_BY_TYPE ? ' TYPE (car/motorcycle/person/truck/other)' : ''}${DETECT_FEATURES ? ' FEATURE (burnout/wheelstand/flames/drift/launch/crash/none)' : ''}. Example: "silver-grey\\n${SORT_BY_TYPE ? 'car' : ''}${SORT_BY_TYPE && DETECT_FEATURES ? ' ' : ''}${DETECT_FEATURES ? 'burnout' : ''}"` : ''),
             },
         ];
@@ -2084,10 +2084,16 @@ async function processSession(sessionId) {
         const thumbUrl = await generateThumb(filePath, sessionId, `${index}_${file}`);
 
         const needsReview = colorInfo.category === 'unknown' || colorInfo.confidence === 'none' || colorInfo.confidence === 'very-low';
-        const folderName = needsReview ? 'please-double-check' : colorInfo.category;
+        const colorName = needsReview ? 'please-double-check' : colorInfo.category;
 
-        // Copy to color folder
-        const colorFolder = path.join(outputDir, folderName);
+        // Build folder path with vehicle type subfolders if enabled
+        let colorFolder;
+        if (SORT_BY_TYPE && colorInfo.vehicleType) {
+            const typeFolder = TYPE_FOLDERS[colorInfo.vehicleType] || 'other';
+            colorFolder = path.join(outputDir, typeFolder, colorName);
+        } else {
+            colorFolder = path.join(outputDir, colorName);
+        }
         fs.mkdirSync(colorFolder, { recursive: true });
         let destName = file;
         let counter = 1;
@@ -2098,15 +2104,21 @@ async function processSession(sessionId) {
         }
         fs.copyFileSync(filePath, path.join(colorFolder, destName));
 
-        // Update session state (synchronized via single-threaded Node.js event loop)
+        // Feature highlights
+        if (DETECT_FEATURES && colorInfo.feature && colorInfo.feature !== 'none') {
+            const featureFolder = path.join(outputDir, '_highlights', colorInfo.feature);
+            fs.mkdirSync(featureFolder, { recursive: true });
+            try { fs.copyFileSync(filePath, path.join(featureFolder, file)); } catch {}
+        }
+
         completedCount++;
-        session.colorCounts[folderName] = (session.colorCounts[folderName] || 0) + 1;
+        session.colorCounts[colorName] = (session.colorCounts[colorName] || 0) + 1;
         session.currentFile = file;
         session.processed = completedCount;
 
         session.results.push({
             filename: file,
-            color: folderName,
+            color: colorName,
             hex: colorInfo.hex,
             rgb: colorInfo.rgb,
             thumb: thumbUrl,
@@ -2448,15 +2460,16 @@ app.post('/sort-local', async (req, res) => {
                             const thumbPromise = generateThumb(filePath, sessionId, thumbName);
 
                             processedCount++;
-                            session.colorCounts[folderName] = (session.colorCounts[folderName] || 0) + 1;
+                            session.colorCounts[colorName] = (session.colorCounts[colorName] || 0) + 1;
                             session.currentFile = file;
                             session.processed = processedCount;
 
                             // Push result immediately (thumb will update async)
                             const resultIdx = session.results.length;
                             session.results.push({
-                                filename: file, color: folderName, hex: colorInfo.hex, rgb: colorInfo.rgb,
+                                filename: file, color: colorName, hex: colorInfo.hex, rgb: colorInfo.rgb,
                                 thumb: null, confidence: colorInfo.confidence || 'unknown',
+                                vehicleType: colorInfo.vehicleType || null, feature: colorInfo.feature || null,
                                 method: colorInfo.method,
                                 needsReview, status: needsReview ? 'Needs Review' : 'Success'
                             });
