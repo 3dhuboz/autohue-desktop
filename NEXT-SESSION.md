@@ -1,84 +1,60 @@
-# AutoHue — Next Session: STABILIZATION (v3.4.1)
+# AutoHue — Current State (v3.5.4)
 
-## What Works (v3.4.0)
-- App opens and starts (no more crash/hang)
-- License gate works (trial auto-activates)
-- Extraction works (ZIP unpacking)
-- Classification runs (images get sorted into folders)
-- Completion screen shows with Download ZIP / Open in Explorer
-- Sharp is bundled (native bindings present)
-- In-app update checker + download with progress bar
-- API worker deployed with correct pricing + min version enforcement
-- Website deployed at autohue.app
-- Admin dashboard at autohue-admin.pages.dev
-- PayPal plans created (6 plans)
+## What's Working
+- Desktop app builds and auto-deploys via GitHub Actions → R2 → auto-update
+- Canvas sort animation (particle system: queue → AI engine → color buckets)
+- Extraction → classification bridge animation ("Initializing AI Engine")
+- Pipeline step numbers (1-5)
+- ZIP download with elapsed timer
+- All 6 gauges animate (Speed, Progress, Accuracy, ETA, Time Saved, Cost Saved)
+- History page with date grouping, lightbox, color swatches
+- License enforcement on all paths
+- In-app update download + install
+- Smart API key rotation with escalating backoff (dead keys get sidelined)
+- Website live at autohue.app with PayPal checkout (subscriptions + credit packs)
+- Monthly/yearly billing toggle on pricing page
 
-## Critical Bugs to Fix
+## Repos
+- Desktop: github.com/3dhuboz/autohue-desktop (v3.5.4)
+- Website: github.com/3dhuboz/autohue-site
+- Admin: github.com/3dhuboz/autohue-admin
+- API Worker: autohue-api.steve-700.workers.dev
+- R2: autohue-releases bucket (auto-deployed via CI)
 
-### 1. Only 1 OpenRouter key loads (should be 5)
-- DB has 5 keys, env var passes 5 comma-separated
-- Worker debug log shows "1 keys"
-- esbuild minification may be mangling `process.env.OPENROUTER_KEY`
-- FIX: Add explicit logging in worker source: `console.log('ENV OPENROUTER_KEY length:', (process.env.OPENROUTER_KEY || '').length)`
-- Or bypass env and only use the `.openrouter-keys` file (more reliable)
+## CI/CD Pipeline
+- Push tag `v*` → GitHub Actions builds .exe + .dmg → uploads to GitHub Releases + R2
+- Desktop app checks R2 on launch → prompts user to update
+- Website: deploy via `npx wrangler pages deploy _site --project-name=autohue-site`
 
-### 2. Color counts show 0 / results not flowing to UI
-- Completion screen: "0 color folders", "0 colors detected"
-- Speed shows 0.0 img/sec during processing
-- The `/status/:sessionId` endpoint returns `new_results` but the frontend isn't receiving them
-- CHECK: Is the `color` field in results populated? Is the polling working?
+## PayPal Plan IDs
+- Hobbyist Monthly: P-7A011980S20678457NHDXQPA ($24/mo)
+- Hobbyist Yearly: P-8CX575826F396683UNHDXRKI ($19/mo billed yearly)
+- Pro Monthly: P-67S36319Y97790222NHDXTAI ($99/mo)
+- Pro Yearly: P-2CF442047U804381PNHDXSKY ($79/mo billed yearly)
+- Unlimited Monthly: P-4XX00824VW5461919NHDXT4Y ($249/mo)
+- Unlimited Yearly: P-6BJ69046B7785863UNHDXUKI ($199/mo billed yearly)
 
-### 3. Stream animation stuck at "STARTING..."
-- Animation component receives `results` array from SortPage
-- SortPage maps `r.file || r.filename` — worker sends `filename` field
-- Animation never shows dots flowing — either results array is empty or animation loop not triggering
-- TEST: Add console.log in SortAnimation to see if results arrive
+## OpenRouter Keys
+- 5 keys in %APPDATA%/autohue-desktop/worker-data/.openrouter-keys
+- Key 1 (...37277d) has $2+ usage — likely low/no credits
+- Keys 2-5 barely used — smart rotation now sidelines dead keys
+- Model: google/gemini-2.0-flash-001
 
-### 4. Gauges don't animate
-- Speed, Progress, Accuracy, ETA, Time Saved, Cost Saved — all static during processing
-- The TachoGauge component needs values to update — check if stats are being set correctly
-
-### 5. ZIP download needs toast + animation
-- User wants visual feedback when ZIP is being built
-- Show "Building ZIP..." overlay, then toast when download starts
-- The `will-download` handler sends `download:complete` event — hook into that
-
-### 6. Website pricing
-- CF Pages build for autohue-site needs build command fixed to `npx next build`
-- Current build may be failing — check CF Pages dashboard
-- SmartScreen notice added to download page (pushed)
-
-## Performance
-- 130 images took 32 minutes — that's ~0.07 img/sec (should be 3-5 img/sec)
-- Root cause: 1 key instead of 5, possible sharp not actually being used despite being bundled
-- Verify sharp loads: check worker startup log for "sharp not available" vs no message
+## Still TODO
+1. **Top up OpenRouter credits** — Key 1 exhausted, keys 2-5 low. Add $5-10 per account or switch to direct Gemini API
+2. **Code signing** — Windows SmartScreen warns without certificate
+3. **Admin worker deploy** — `cd autohue-admin/workers/api && npx wrangler deploy` to activate latest endpoints
+4. **Credit purchase backend** — /api/credits/purchase endpoint needs implementing on the admin worker
+5. **Post-payment license key email** — PayPal webhook → generate license → email to customer
+6. **Mac build testing** — DMG builds via CI but untested on actual Mac hardware
 
 ## Architecture
-- Desktop: github.com/3dhuboz/autohue-desktop (v3.4.0)
-- Admin: github.com/3dhuboz/autohue-admin
-- Website: github.com/3dhuboz/autohue-site
-- API: autohue-api.steve-700.workers.dev
-- R2: autohue-releases bucket
-- 5 OpenRouter keys in DB + .openrouter-keys file
-- Model: google/gemini-2.0-flash-001
-- NO OBFUSCATION — removed from build pipeline, code in private repo
+- Worker: worker/server.js (bundled via esbuild)
+- Renderer: React + Vite, polls /status/:sessionId every 1.5s
+- Electron main: electron/main.js
+- License: electron/license.js (sql.js WASM)
+- Downloads: R2 bucket served via admin API
+- CI: GitHub Actions on tag push → build → GitHub Release + R2 upload
 
-## Build Process
-```bash
-cd autohue-desktop
-npx vite build renderer
-node scripts/build-worker.js    # Must show "Copying native module: sharp"
-# DO NOT run obfuscate-electron.js
-rm -rf dist/                    # Always clean first
-CSC_IDENTITY_AUTO_DISCOVERY=false npx electron-builder --win nsis
-# Verify: npx asar list dist/win-unpacked/resources/app.asar | grep electron/
-# All files should be <25KB (not 8MB obfuscated)
-```
-
-## Feature Requests (AFTER stabilization)
-- Accuracy/speed differences shown per tier
-- Vehicle type sorting UI toggles
-- Feature shot detection toggles
-- ZIP build animation + toast
-- Clickable link to return to active session
-- Admin: usage stats, bonus credits, enhanced dashboard
+## Color Categories (13 total)
+red, blue, green, yellow, orange, purple, pink, brown, black, white, silver-grey, cream, please-double-check
