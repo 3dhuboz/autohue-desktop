@@ -499,8 +499,9 @@ export default function SortPage() {
           // Capture final stats BEFORE changing phase — use ref for guaranteed access
           const finalProcessed = data.processed || stats.processed || 0;
           const finalColorCounts = data.color_counts || stats.colorCounts || {};
-          const elapsed = Math.max(1, Math.round((Date.now() - (stats.startTime || Date.now())) / 1000));
-          const finalIps = elapsed > 0 ? finalProcessed / elapsed : stats.imagesPerSecond;
+          const startT = stats.startTime > 0 ? stats.startTime : Date.now() - Math.max(1, finalProcessed / Math.max(stats.imagesPerSecond, 0.1)) * 1000;
+          const elapsed = Math.max(1, Math.round((Date.now() - startT) / 1000));
+          const finalIps = stats.imagesPerSecond > 0 ? stats.imagesPerSecond : (elapsed > 1 ? finalProcessed / elapsed : 0);
           const finalTimeSaved = finalProcessed * 15; // 15s per manual sort
           const finalConf = stats.avgConfidence > 0 ? stats.avgConfidence : 0.95;
           // Store in ref so completion screen always has data
