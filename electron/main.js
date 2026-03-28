@@ -199,7 +199,8 @@ function createWindow() {
     const filename = item.getFilename() || 'sorted_photos.zip';
     // Let Electron show its save dialog (default behavior)
     // The item already has a suggested filename
-    item.setSuggestedFilename(filename);
+    // setSuggestedFilename not available in all Electron versions
+    if (typeof item.setSuggestedFilename === 'function') item.setSuggestedFilename(filename);
 
     item.once('done', (e, state) => {
       if (mainWindow && !mainWindow.isDestroyed()) {

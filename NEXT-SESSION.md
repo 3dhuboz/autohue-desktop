@@ -1,82 +1,84 @@
-# AutoHue — Next Session: STABILIZATION (v3.4.0)
+# AutoHue — Next Session: STABILIZATION (v3.4.1)
 
-## CRITICAL: Do NOT add features. Fix bugs first.
+## What Works (v3.4.0)
+- App opens and starts (no more crash/hang)
+- License gate works (trial auto-activates)
+- Extraction works (ZIP unpacking)
+- Classification runs (images get sorted into folders)
+- Completion screen shows with Download ZIP / Open in Explorer
+- Sharp is bundled (native bindings present)
+- In-app update checker + download with progress bar
+- API worker deployed with correct pricing + min version enforcement
+- Website deployed at autohue.app
+- Admin dashboard at autohue-admin.pages.dev
+- PayPal plans created (6 plans)
 
-## Root Causes Identified
-1. **Worker crashes mid-sort (OOM)** — Jimp loads multiple high-res images concurrently for batch classification. With BATCH_CONCURRENCY=5 and large ZIPs (1000+ images), memory spikes and kills the worker process. Worker auto-restarts but session state is lost.
-2. **Obfuscation destroys the app** — javascript-obfuscator produces 8MB+ files that infinite-loop. NEVER run `node scripts/obfuscate-electron.js`. Remove it from build pipeline. Code is in a private repo — obfuscation not needed.
-3. **Worker only loads 1 OpenRouter key** — Despite 5 keys in `.openrouter-keys` file and env var `OPENROUTER_KEY=key1,key2,...`, the debug log shows "1 keys". The comma-split key loading works in isolation but something in the bundled worker differs.
+## Critical Bugs to Fix
 
-## Bugs to Fix (in order)
+### 1. Only 1 OpenRouter key loads (should be 5)
+- DB has 5 keys, env var passes 5 comma-separated
+- Worker debug log shows "1 keys"
+- esbuild minification may be mangling `process.env.OPENROUTER_KEY`
+- FIX: Add explicit logging in worker source: `console.log('ENV OPENROUTER_KEY length:', (process.env.OPENROUTER_KEY || '').length)`
+- Or bypass env and only use the `.openrouter-keys` file (more reliable)
 
-### P0: Worker crash / classification failure
-- Add memory limit: process images 1 at a time with serial fallback when memory is low
-- Add `--max-old-space-size=4096` to worker fork options
-- Reduce BATCH_CONCURRENCY to 2 (not 5)
-- Add try/catch around every Jimp.read() with explicit error logging
-- Log worker crash reason: capture `process.on('exit')` code and write to debug log
+### 2. Color counts show 0 / results not flowing to UI
+- Completion screen: "0 color folders", "0 colors detected"
+- Speed shows 0.0 img/sec during processing
+- The `/status/:sessionId` endpoint returns `new_results` but the frontend isn't receiving them
+- CHECK: Is the `color` field in results populated? Is the polling working?
 
-### P1: Key loading
-- Debug why 5 keys become 1 in the worker — add explicit logging of OPENROUTER_KEY env var length and split results
-- Verify the comma-separated env var works in forked child process
+### 3. Stream animation stuck at "STARTING..."
+- Animation component receives `results` array from SortPage
+- SortPage maps `r.file || r.filename` — worker sends `filename` field
+- Animation never shows dots flowing — either results array is empty or animation loop not triggering
+- TEST: Add console.log in SortAnimation to see if results arrive
 
-### P2: UI fixes
-- Health endpoint: report "ready" when API keys are set even if ONNX models not loaded
-- Stream animation: verify it works (never tested in production)
-- Extraction animation: hide when paused (code fixed, needs rebuild)
-- "Starting..." label in animation: should show actual classification progress
+### 4. Gauges don't animate
+- Speed, Progress, Accuracy, ETA, Time Saved, Cost Saved — all static during processing
+- The TachoGauge component needs values to update — check if stats are being set correctly
 
-### P3: Website
-- CF Pages autohue-site: change build command to `npx next build`, output to `.next`
-- Verify pricing shows $24/$99/$249 after deploy
-- Remove "Buy Credits" section (not implemented yet)
+### 5. ZIP download needs toast + animation
+- User wants visual feedback when ZIP is being built
+- Show "Building ZIP..." overlay, then toast when download starts
+- The `will-download` handler sends `download:complete` event — hook into that
 
-## Build Process (CORRECT ORDER)
+### 6. Website pricing
+- CF Pages build for autohue-site needs build command fixed to `npx next build`
+- Current build may be failing — check CF Pages dashboard
+- SmartScreen notice added to download page (pushed)
+
+## Performance
+- 130 images took 32 minutes — that's ~0.07 img/sec (should be 3-5 img/sec)
+- Root cause: 1 key instead of 5, possible sharp not actually being used despite being bundled
+- Verify sharp loads: check worker startup log for "sharp not available" vs no message
+
+## Architecture
+- Desktop: github.com/3dhuboz/autohue-desktop (v3.4.0)
+- Admin: github.com/3dhuboz/autohue-admin
+- Website: github.com/3dhuboz/autohue-site
+- API: autohue-api.steve-700.workers.dev
+- R2: autohue-releases bucket
+- 5 OpenRouter keys in DB + .openrouter-keys file
+- Model: google/gemini-2.0-flash-001
+- NO OBFUSCATION — removed from build pipeline, code in private repo
+
+## Build Process
 ```bash
 cd autohue-desktop
-
-# 1. Build renderer
 npx vite build renderer
-
-# 2. Build worker bundle
-node scripts/build-worker.js
-
-# 3. DO NOT RUN obfuscate-electron.js
-
-# 4. Build installer
+node scripts/build-worker.js    # Must show "Copying native module: sharp"
+# DO NOT run obfuscate-electron.js
+rm -rf dist/                    # Always clean first
 CSC_IDENTITY_AUTO_DISCOVERY=false npx electron-builder --win nsis
-
-# 5. Verify clean electron files in build
-npx asar list dist/win-unpacked/resources/app.asar | grep electron/
-# Should show: main.js, preload.js, worker-manager.js, license.js, database.js, rules-sync.js
-# Each should be <20KB, NOT 8MB
-
-# 6. Test locally before deploying
-# Run dist/win-unpacked/AutoHue.exe and verify it opens + sorts
+# Verify: npx asar list dist/win-unpacked/resources/app.asar | grep electron/
+# All files should be <25KB (not 8MB obfuscated)
 ```
 
-## Architecture Reference
-- Desktop: github.com/3dhuboz/autohue-desktop (private)
-- Admin: github.com/3dhuboz/autohue-admin (private)
-- Website: github.com/3dhuboz/autohue-site (private)
-- API: autohue-api.steve-700.workers.dev (Hono + D1 + R2)
-- Admin UI: autohue-admin.pages.dev
-- Website: autohue.app (CF Pages, connected to autohue-site repo)
-- R2: autohue-releases bucket
-- 5 OpenRouter keys in DB (openrouter_api_keys JSON array)
-- Claude Vision key in DB (claude_api_key)
-- Model: google/gemini-2.0-flash-001
-
-## Pricing
-- Trial: Free (50/day, 7 days)
-- Hobbyist: $19/$24/mo (300/day)
-- Pro: $79/$99/mo (2,000/day)
-- Unlimited: $199/$249/mo (10,000/day)
-
-## PayPal Plan IDs
-- Hobbyist Monthly: P-0E0766276B1139608NHDRU3Y
-- Hobbyist Yearly: P-04J7698388447105MNHDRU4A
-- Pro Monthly: P-46801253NN0274710NHDRU4A
-- Pro Yearly: P-45T46267H7712901ENHDRU4I
-- Unlimited Monthly: P-41F22498TS119561PNHDRU4Q
-- Unlimited Yearly: P-2B694765K85756836NHDRU4Q
+## Feature Requests (AFTER stabilization)
+- Accuracy/speed differences shown per tier
+- Vehicle type sorting UI toggles
+- Feature shot detection toggles
+- ZIP build animation + toast
+- Clickable link to return to active session
+- Admin: usage stats, bonus credits, enhanced dashboard
