@@ -144,6 +144,7 @@ export default function HistoryPage() {
   };
 
   const handleDelete = async (id: number) => {
+    if (!confirm('Delete this sort session? This cannot be undone.')) return;
     await window.electronAPI.deleteHistory(id);
     setHistory(prev => prev.filter(h => h.id !== id));
     setSelectedIds(prev => { const next = new Set(prev); next.delete(id); return next; });

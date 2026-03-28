@@ -11,9 +11,25 @@ let db;
 let licenseManager;
 let workerManager;
 let rulesSync;
+let isQuitting = false;
 
 const isDev = !app.isPackaged;
 const API_BASE = 'https://autohue-api.steve-700.workers.dev';
+
+// ── Single instance lock — prevent multiple AutoHue instances ──
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    // Someone launched a second instance — focus the existing window
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  });
+}
 
 async function checkForUpdates() {
   try {
@@ -194,6 +210,35 @@ function createWindow() {
     mainWindow.focus();
   });
 
+  // Minimize to tray instead of taskbar
+  mainWindow.on('minimize', (e) => {
+    e.preventDefault();
+    mainWindow.hide();
+    if (tray) tray.setToolTip('AutoHue — Running in background');
+  });
+
+  // Close button → confirm quit (not just hide)
+  mainWindow.on('close', (e) => {
+    if (!isQuitting) {
+      e.preventDefault();
+      const choice = dialog.showMessageBoxSync(mainWindow, {
+        type: 'question',
+        buttons: ['Minimize to Tray', 'Quit AutoHue'],
+        defaultId: 0,
+        cancelId: 0,
+        title: 'Close AutoHue',
+        message: 'What would you like to do?',
+        detail: 'Minimizing keeps AutoHue running in the background for quick access.',
+      });
+      if (choice === 1) {
+        isQuitting = true;
+        app.quit();
+      } else {
+        mainWindow.hide();
+      }
+    }
+  });
+
   // Prevent window.open() from creating blank Electron windows (e.g. ZIP download)
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.includes('/download/') || url.startsWith('http')) {
@@ -367,7 +412,7 @@ app.whenReady().then(async () => {
     tray.setContextMenu(Menu.buildFromTemplate([
       { label: 'Open AutoHue', click: () => { if (mainWindow) { mainWindow.show(); mainWindow.focus(); } else createWindow(); } },
       { type: 'separator' },
-      { label: 'Quit', click: () => { app.quit(); } },
+      { label: 'Quit', click: () => { isQuitting = true; app.quit(); } },
     ]));
     tray.on('click', () => { if (mainWindow) { mainWindow.show(); mainWindow.focus(); } });
   } catch (err) {
