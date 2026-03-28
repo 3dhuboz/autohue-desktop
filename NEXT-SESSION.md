@@ -1,58 +1,52 @@
-# AutoHue — Next Session (v3.3.2)
+# AutoHue — Next Session (v3.3.5)
 
-## CRITICAL: Still Broken
-1. **Animation shows "WAITING..."** — never animates during sort. isProcessing prop is correct but results aren't flowing to trigger animation phases. The SortAnimation component needs results in stats.results to animate, but the capped status endpoint (50 per poll) may not be advancing the cursor.
+## Completed (this session — v3.3.3 → v3.3.4)
+1. **Vehicle type sorting UI** — Checkboxes on SortPage for "Sort by vehicle type" (cars/bikes/people) and "Detect feature shots" (wheelstands, flames, burnouts). Settings persist via SQLite.
+2. **Stream animation** — Replaced one-at-a-time animation with continuous flowing stream of color dots. Scales with throughput, shows img/s speed, no more "WAITING" stalls.
+3. **Admin dashboard deployed** — `autohue-admin.pages.dev` (Cloudflare Pages). Clerk auth, customer/license/payment management.
+4. **PayPal plans created** — 6 live subscription plans (3 tiers × monthly/yearly). Env vars set on autohue-site.
+5. **GitHub secrets** — CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_API_TOKEN set for CI.
+6. **Admin API redeployed** — R2 binding active, download endpoints live.
+7. **Auto-update working** — GitHub Releases with latest.yml + blockmap for electron-updater.
 
-2. **Gauges show 0s/$0** — TIME SAVED and COST SAVED stay at zero during processing. timeSavedSeconds calculation: `Math.max(0, manualTime - aiTime)` where manualTime = processed * 15 and aiTime = elapsed. If elapsed > manualTime (slow processing), result is 0. The formula is wrong — timeSaved should ALWAYS be processed * 15 regardless of actual speed.
-
-3. **Processed count was exceeding total (1170/996)** — FIXED in v3.3.2 with hard cap in grabBatch + status endpoint clamp. NEEDS TESTING.
-
-4. **Sort hangs after completion** — stall detector added (15s at 95%+) but untested. The completion check `data.processed >= data.total` should work now that counts are capped.
-
-5. **ZIP download** — switched from <a> tag to window.open() for Electron handler. UNTESTED.
-
-6. **History empty** — recordUsage fix applied (UPDATE instead of INSERT OR REPLACE). UNTESTED.
-
-## What Works Well
-- 5 API key rotation: 4.4 img/sec achieved
-- Gemini 2.0 Flash via OpenRouter
-- Extraction with yauzl pre-scan
-- Color accuracy much improved (cream separate, grey-green → silver-grey)
-- Vehicle type sorting toggle
-- Feature shot detection toggle
-- Auto-publish releases + auto-update clients
-- Green loading bar during engine startup
-
-## Color Categories (13 total)
-red, blue, green, yellow, orange, purple, pink, brown, black, white, silver-grey, cream, please-double-check
-
-## Known Accuracy Issues
-- Rat rod / patina cars (multi-color) → should go to please-double-check
-- Background vehicles can still influence classification
-- Cream vs yellow edge cases (champagne metallic)
+## Still TODO
+1. **Mac build** — Need macOS runner or cross-compile for .dmg
+2. **Code signing** — Windows SmartScreen warning without certificate
+3. **Test PayPal checkout flow end-to-end** — Verify subscription creates customer + sends license key email
+4. **Webhook setup** — Ensure PayPal webhook URL points to `/api/paypal-webhook`
+5. **Custom domain for admin** — Optional: `admin.autohue.app` instead of `autohue-admin.pages.dev`
 
 ## Architecture
-- Worker: worker/server.js → bundled via esbuild to worker/dist/server.js
-- TWO processing paths exist (potential double-processing bug):
-  - `processSession()` — old pipeline, called from upload endpoint
-  - Phase 2 pipeline — new, called from sort-local endpoint for archives
-  - BOTH call collectImageFiles() and process images
-  - Need to verify only ONE runs per session
-- Renderer: React + Vite, polls /status/:sessionId every 1s
-- 5 keys at: %APPDATA%/autohue-desktop/worker-data/.openrouter-keys
+- Worker: worker/server.js (bundled via esbuild)
+- Renderer: React + Vite, polls /status/:sessionId every 1.5s
+- Electron main: electron/main.js
+- License: electron/license.js (sql.js WASM)
+- 5 API keys at: %APPDATA%/autohue-desktop/worker-data/.openrouter-keys
 - Model: google/gemini-2.0-flash-001
-- CI: draft → build → publish (auto)
+- Downloads: R2 bucket `autohue-releases` served via admin API
+- CI: GitHub Actions on tag push → build → GitHub Release + R2 upload
+- Admin: autohue-admin.pages.dev (React + Clerk + Cloudflare Pages)
+- API: autohue-api.steve-700.workers.dev (Hono + D1 + R2)
 
-## Enterprise Roadmap (v4.0.0)
-- License plate / rego reading
-- Cross-event car database
-- Customer portal
-- See ROADMAP.md
+## Color Categories (14 total)
+red, blue, green, yellow, orange, purple, pink, brown, black, white, silver-grey, cream, please-double-check
 
-## Fix Priority for Next Session
-1. Fix timeSaved formula (always = processed * 15, not dependent on elapsed)
-2. Test completion transition with capped counts
-3. Fix animation — ensure results flow to SortAnimation component
-4. Test ZIP download via window.open()
-5. Test history recording
-6. Investigate double-processing (two code paths)
+## Vehicle Types (when enabled)
+car → cars/, motorcycle → bikes/, person → people/, truck → trucks/, other → other/
+
+## Feature Shots (when enabled)
+Copied to _highlights/{feature}/ — wheelstand, flames, burnout, drift, launch, crash
+
+## Pricing (yearly / monthly)
+- Trial: Free (7 days, 50/day)
+- Hobbyist: $19/$24 per month (300/day)
+- Pro: $79/$99 per month (2,000/day) — Most Popular
+- Unlimited: $199/$249 per month (10,000/day)
+
+## PayPal Plan IDs
+- Hobbyist Monthly: P-0E0766276B1139608NHDRU3Y
+- Hobbyist Yearly: P-04J7698388447105MNHDRU4A
+- Pro Monthly: P-46801253NN0274710NHDRU4A
+- Pro Yearly: P-45T46267H7712901ENHDRU4I
+- Unlimited Monthly: P-41F22498TS119561PNHDRU4Q
+- Unlimited Yearly: P-2B694765K85756836NHDRU4Q

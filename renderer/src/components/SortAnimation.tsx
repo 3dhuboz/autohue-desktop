@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 
 // ── Types ──
 interface SortResult {
@@ -18,164 +18,176 @@ interface SortAnimationProps {
 const COLOR_SWATCHES: Record<string, string> = {
   red: '#ef4444', blue: '#3b82f6', green: '#22c55e', yellow: '#eab308',
   orange: '#f97316', purple: '#a855f7', pink: '#ec4899', brown: '#a16207',
-  black: '#334155', white: '#e2e8f0', 'silver-grey': '#94a3b8',
+  black: '#334155', white: '#e2e8f0', 'silver-grey': '#94a3b8', cream: '#fef3c7',
   unknown: '#f87171', 'please-double-check': '#f59e0b',
 };
 
 const COLOR_LABELS: Record<string, string> = {
   red: 'Red', blue: 'Blue', green: 'Green', yellow: 'Yellow',
   orange: 'Orange', purple: 'Purple', pink: 'Pink', brown: 'Brown',
-  black: 'Black', white: 'White', 'silver-grey': 'Silver/Grey',
+  black: 'Black', white: 'White', 'silver-grey': 'Silver/Grey', cream: 'Cream',
   unknown: 'Unknown', 'please-double-check': 'Review',
 };
 
-// ── Animation phases — FAST to match real processing speed ──
-type AnimPhase = 'enter' | 'analyze' | 'result' | 'exit' | 'idle';
+// Flying dot in the stream
+interface StreamDot {
+  id: number;
+  color: string;
+  x: number; // 0-100 progress across track
+  thumb: string | null;
+}
 
 export default function SortAnimation({ results, isProcessing, totalProcessed, totalImages }: SortAnimationProps) {
-  const [queue, setQueue] = useState<SortResult[]>([]);
-  const [current, setCurrent] = useState<SortResult | null>(null);
-  const [phase, setPhase] = useState<AnimPhase>('idle');
-  const [completed, setCompleted] = useState<SortResult[]>([]);
+  const [dots, setDots] = useState<StreamDot[]>([]);
+  const [recentColors, setRecentColors] = useState<{ color: string; id: number }[]>([]);
   const processedRef = useRef(0);
-  const animatingRef = useRef(false);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dotIdRef = useRef(0);
+  const animFrameRef = useRef<number>(0);
+  const lastTickRef = useRef(performance.now());
+  const pendingRef = useRef<SortResult[]>([]);
+  const spawnTimerRef = useRef(0);
 
-  // Speed: dynamically adjust animation duration based on queue depth
-  // More items queued = faster animation to keep up
-  const getSpeed = useCallback(() => {
-    const q = queue.length;
-    if (q > 20) return { enter: 100, analyze: 150, result: 120, exit: 80 };
-    if (q > 10) return { enter: 150, analyze: 200, result: 150, exit: 100 };
-    if (q > 3) return { enter: 200, analyze: 300, result: 200, exit: 120 };
-    return { enter: 300, analyze: 400, result: 250, exit: 150 };
-  }, [queue.length]);
+  // Track throughput for speed display
+  const throughputRef = useRef<number[]>([]);
+  const lastCountRef = useRef(0);
+  const throughputTimerRef = useRef<ReturnType<typeof setInterval>>();
+
+  // Measure throughput every second
+  useEffect(() => {
+    throughputTimerRef.current = setInterval(() => {
+      const current = processedRef.current;
+      const delta = current - lastCountRef.current;
+      lastCountRef.current = current;
+      throughputRef.current.push(delta);
+      if (throughputRef.current.length > 5) throughputRef.current.shift();
+    }, 1000);
+    return () => clearInterval(throughputTimerRef.current);
+  }, []);
+
+  const avgSpeed = useMemo(() => {
+    const arr = throughputRef.current;
+    if (arr.length === 0) return 0;
+    return arr.reduce((a, b) => a + b, 0) / arr.length;
+  }, [dots]); // recalc when dots change
 
   // Enqueue new results
   useEffect(() => {
     if (results.length > processedRef.current) {
       const newItems = results.slice(processedRef.current);
       processedRef.current = results.length;
-      setQueue(prev => [...prev, ...newItems]);
+      pendingRef.current.push(...newItems);
     }
   }, [results]);
 
-  // Process queue
-  const processNext = useCallback(() => {
-    setQueue(prev => {
-      if (prev.length === 0) {
-        animatingRef.current = false;
-        setCurrent(null);
-        setPhase('idle');
-        return prev;
-      }
-      const [next, ...rest] = prev;
-      animatingRef.current = true;
-      setCurrent(next);
-
-      const speed = rest.length > 20 ? { enter: 100, analyze: 150, result: 120, exit: 80 }
-        : rest.length > 10 ? { enter: 150, analyze: 200, result: 150, exit: 100 }
-        : rest.length > 3 ? { enter: 200, analyze: 300, result: 200, exit: 120 }
-        : { enter: 300, analyze: 400, result: 250, exit: 150 };
-
-      setPhase('enter');
-      timerRef.current = setTimeout(() => {
-        setPhase('analyze');
-        timerRef.current = setTimeout(() => {
-          setPhase('result');
-          timerRef.current = setTimeout(() => {
-            setPhase('exit');
-            setCompleted(c => [next, ...c].slice(0, 50));
-            timerRef.current = setTimeout(() => processNext(), speed.exit);
-          }, speed.result);
-        }, speed.analyze);
-      }, speed.enter);
-
-      return rest;
-    });
-  }, []);
-
+  // Animation loop — spawns dots from pending queue and moves them across
   useEffect(() => {
-    if (queue.length > 0 && !animatingRef.current) processNext();
-  }, [queue, processNext]);
+    if (!isProcessing && pendingRef.current.length === 0 && dots.length === 0) return;
 
-  useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current); }, []);
+    const tick = (now: number) => {
+      const dt = Math.min(now - lastTickRef.current, 50); // cap delta
+      lastTickRef.current = now;
 
-  const swatch = current ? (COLOR_SWATCHES[current.color] || '#94a3b8') : '#dc2626';
-  const isWaiting = phase === 'idle' && isProcessing;
-  const speed = getSpeed();
-  const totalEnterExit = speed.enter + speed.exit;
+      // Speed: how fast dots travel (% per ms) — scales with throughput
+      const speed = Math.max(0.04, Math.min(0.15, avgSpeed * 0.025 + 0.04));
+
+      // Spawn interval: faster spawn when more pending
+      const spawnInterval = pendingRef.current.length > 20 ? 60
+        : pendingRef.current.length > 5 ? 120
+        : 200;
+
+      spawnTimerRef.current += dt;
+
+      // Spawn new dots from pending queue
+      if (pendingRef.current.length > 0 && spawnTimerRef.current >= spawnInterval) {
+        spawnTimerRef.current = 0;
+        // Spawn multiple if heavily backed up
+        const spawnCount = pendingRef.current.length > 30 ? 3 : pendingRef.current.length > 10 ? 2 : 1;
+        const newDots: StreamDot[] = [];
+        for (let i = 0; i < spawnCount && pendingRef.current.length > 0; i++) {
+          const item = pendingRef.current.shift()!;
+          newDots.push({
+            id: dotIdRef.current++,
+            color: item.color,
+            x: -2 - i * 3, // stagger start positions slightly
+            thumb: item.thumb,
+          });
+        }
+        setDots(prev => [...prev, ...newDots]);
+        setRecentColors(prev => {
+          const updated = [...newDots.map(d => ({ color: d.color, id: d.id })), ...prev];
+          return updated.slice(0, 30);
+        });
+      }
+
+      // Move all dots forward and remove completed ones
+      setDots(prev => {
+        const updated = prev.map(d => ({ ...d, x: d.x + speed * dt })).filter(d => d.x < 105);
+        return updated;
+      });
+
+      animFrameRef.current = requestAnimationFrame(tick);
+    };
+
+    animFrameRef.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(animFrameRef.current);
+  }, [isProcessing, avgSpeed, dots.length]);
+
+  const remaining = Math.max(0, (totalImages || 0) - (totalProcessed || 0));
+  const progress = totalImages && totalImages > 0 ? Math.min(100, ((totalProcessed || 0) / totalImages) * 100) : 0;
 
   return (
-    <div className="space-y-4">
-      {/* ── Animation Stage ── */}
-      <div className="relative w-full select-none overflow-hidden" style={{ height: 180 }}>
+    <div className="space-y-3">
+      {/* ── Stream Animation ── */}
+      <div className="relative w-full select-none overflow-hidden" style={{ height: 160 }}>
         <style>{`
-          @keyframes ah-pulse { 0%,100%{transform:scale(1);opacity:.35} 50%{transform:scale(1.4);opacity:.08} }
-          @keyframes ah-core-pulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.05)} }
-          @keyframes ah-spin-slow { from{transform:rotate(0)} to{transform:rotate(360deg)} }
-          @keyframes ah-scan { 0%{top:15%;opacity:0} 10%{opacity:.8} 90%{opacity:.8} 100%{top:85%;opacity:0} }
-          @keyframes ah-toast-pop { from{transform:translateY(6px) scale(.9);opacity:0} to{transform:translateY(0) scale(1);opacity:1} }
-          @keyframes ah-check-draw { from{stroke-dashoffset:24} to{stroke-dashoffset:0} }
-          @keyframes ah-folder-bump { 0%{transform:scale(1)} 40%{transform:scale(1.12)} 100%{transform:scale(1)} }
-          @keyframes ah-particle-burst { 0%{transform:translate(0,0) scale(1);opacity:.9} 100%{transform:translate(var(--px),var(--py)) scale(0);opacity:0} }
-          @keyframes ah-glow { 0%,100%{opacity:.12} 50%{opacity:.3} }
-          @keyframes ah-waiting-pulse { 0%,100%{box-shadow:0 0 15px rgba(220,38,38,.15)} 50%{box-shadow:0 0 30px rgba(220,38,38,.3)} }
-          @keyframes ah-trail { 0%{width:0;opacity:.6} 50%{width:60px;opacity:.3} 100%{width:0;opacity:0} }
+          @keyframes ah-core-spin { from{transform:rotate(0)} to{transform:rotate(360deg)} }
+          @keyframes ah-glow-pulse { 0%,100%{opacity:.15} 50%{opacity:.35} }
+          @keyframes ah-dot-pop { from{transform:scale(0);opacity:0} to{transform:scale(1);opacity:1} }
+          @keyframes ah-folder-bump { 0%{transform:scale(1)} 40%{transform:scale(1.15)} 100%{transform:scale(1)} }
         `}</style>
 
-        {/* Track line */}
-        <div className="absolute top-1/2 left-12 right-12 -translate-y-1/2 h-px" style={{
-          backgroundImage: 'repeating-linear-gradient(90deg, rgba(255,255,255,0.06) 0, rgba(255,255,255,0.06) 4px, transparent 4px, transparent 12px)',
+        {/* Track line with gradient */}
+        <div className="absolute top-1/2 left-14 right-14 -translate-y-1/2 h-[2px] rounded-full" style={{
+          background: `linear-gradient(90deg, rgba(220,38,38,0.15), rgba(220,38,38,0.08) 40%, rgba(34,197,94,0.08) 60%, rgba(34,197,94,0.15))`,
+        }} />
+        {/* Track dots */}
+        <div className="absolute top-1/2 left-14 right-14 -translate-y-1/2 h-px" style={{
+          backgroundImage: 'repeating-linear-gradient(90deg, rgba(255,255,255,0.04) 0, rgba(255,255,255,0.04) 2px, transparent 2px, transparent 10px)',
         }} />
 
-        {/* LEFT: Remaining */}
-        <div className="absolute left-2 top-1/2 -translate-y-1/2 flex flex-col items-center gap-1">
-          <div className="w-10 h-10 rounded-lg border border-dashed border-white/10 flex items-center justify-center bg-white/[0.02]">
-            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-white/20">
+        {/* LEFT: Source stack */}
+        <div className="absolute left-1 top-1/2 -translate-y-1/2 flex flex-col items-center gap-1 z-10">
+          <div className="w-11 h-11 rounded-xl border border-dashed border-white/10 flex items-center justify-center bg-white/[0.02]">
+            <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-white/20">
               <rect x="2" y="2" width="12" height="12" rx="2" />
               <circle cx="5.5" cy="5.5" r="1.5" fill="currentColor" fillOpacity=".3" />
               <path d="M2 11L5 8L7 10L10 6L14 11" />
             </svg>
           </div>
-          {totalImages && totalProcessed !== undefined && (
-            <span className="text-[11px] text-orange-400/80 font-bold tabular-nums">{Math.max(0, (totalImages || 0) - (totalProcessed || 0))}</span>
-          )}
+          <span className="text-[12px] text-orange-400/80 font-bold tabular-nums">{remaining}</span>
           <span className="text-[7px] text-white/20 tracking-widest uppercase">Remaining</span>
         </div>
 
-        {/* CENTER: AutoHue Brain */}
-        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex flex-col items-center z-10">
-          {/* Ambient glow */}
-          <div className="absolute w-32 h-32 rounded-full pointer-events-none" style={{
-            background: `radial-gradient(circle, ${phase === 'analyze' ? `${swatch}20` : 'rgba(220,38,38,0.08)'} 0%, transparent 70%)`,
-            animation: 'ah-glow 3s ease-in-out infinite',
-          }} />
+        {/* CENTER: AutoHue engine */}
+        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex flex-col items-center z-20">
+          <div className="relative w-14 h-14 flex items-center justify-center">
+            {/* Outer ring glow */}
+            <div className="absolute inset-[-8px] rounded-full" style={{
+              background: dots.length > 0
+                ? `radial-gradient(circle, ${COLOR_SWATCHES[dots[dots.length - 1]?.color] || '#dc2626'}12 0%, transparent 70%)`
+                : 'radial-gradient(circle, rgba(220,38,38,0.06) 0%, transparent 70%)',
+              animation: 'ah-glow-pulse 2s ease-in-out infinite',
+            }} />
 
-          <div className="relative w-[72px] h-[72px] flex items-center justify-center">
-            {/* Pulse rings */}
-            {[0, 0.3, 0.6].map((delay, i) => (
-              <div key={i} className="absolute rounded-full" style={{
-                inset: `${-6 * (i + 1)}px`,
-                border: `1px solid ${phase === 'analyze' ? `${swatch}25` : 'rgba(220,38,38,0.06)'}`,
-                animation: `ah-pulse ${isWaiting ? '2.5s' : '1.8s'} ease-in-out infinite ${delay}s`,
-                animationPlayState: isProcessing ? 'running' : 'paused',
-                transition: 'border-color 0.3s',
-              }} />
-            ))}
-
-            {/* Core orb */}
-            <div className="relative w-[56px] h-[56px] rounded-full overflow-hidden flex items-center justify-center" style={{
+            {/* Core */}
+            <div className="w-12 h-12 rounded-full flex items-center justify-center" style={{
               background: 'radial-gradient(circle at 35% 35%, #2a2a3e, #16162a)',
-              boxShadow: phase === 'analyze'
-                ? `0 0 25px ${swatch}55, 0 0 50px ${swatch}22, inset 0 0 20px ${swatch}22`
-                : isWaiting ? undefined : '0 0 20px rgba(220,38,38,0.12), inset 0 0 12px rgba(220,38,38,0.06)',
-              animation: isWaiting ? 'ah-waiting-pulse 2s ease-in-out infinite' : 'ah-core-pulse 2.4s ease-in-out infinite',
-              transition: 'box-shadow 0.3s',
+              boxShadow: isProcessing && dots.length > 0
+                ? `0 0 20px ${COLOR_SWATCHES[dots[dots.length - 1]?.color] || '#dc2626'}33`
+                : '0 0 15px rgba(220,38,38,0.08)',
             }}>
-              {/* Color wheel */}
-              <svg viewBox="0 0 40 40" width="30" height="30" style={{
-                animation: `ah-spin-slow ${phase === 'analyze' ? '0.6s' : '12s'} linear infinite`,
+              <svg viewBox="0 0 40 40" width="26" height="26" style={{
+                animation: `ah-core-spin ${isProcessing ? Math.max(0.4, 3 - avgSpeed * 0.4) + 's' : '12s'} linear infinite`,
                 animationPlayState: isProcessing ? 'running' : 'paused',
               }}>
                 <defs>
@@ -190,145 +202,79 @@ export default function SortAnimation({ results, isProcessing, totalProcessed, t
                 ].map(([d,id]) => (
                   <path key={id} d={d} stroke={`url(#ah-${id})`} strokeWidth="3" fill="none" strokeLinecap="round" />
                 ))}
-                <circle cx="20" cy="20" r="3.5" fill="rgba(255,255,255,0.9)" />
-                <circle cx="20" cy="20" r="1.5" fill="rgba(220,38,38,0.8)" />
+                <circle cx="20" cy="20" r="3" fill="rgba(255,255,255,0.9)" />
+                <circle cx="20" cy="20" r="1.2" fill="rgba(220,38,38,0.8)" />
               </svg>
-
-              {/* Scan line */}
-              {phase === 'analyze' && (
-                <div className="absolute left-2 right-2 h-[2px]" style={{
-                  background: `linear-gradient(90deg, transparent, ${swatch}aa, transparent)`,
-                  animation: `ah-scan ${speed.analyze}ms ease-in-out`,
-                  borderRadius: 1,
-                }} />
-              )}
             </div>
           </div>
-
-          {/* Label */}
-          <span className="mt-1 text-[9px] tracking-[0.15em] uppercase font-medium transition-colors duration-200" style={{
-            color: phase === 'analyze' ? `${swatch}dd` : isWaiting ? 'rgba(220,38,38,0.5)' : 'rgba(255,255,255,0.25)',
+          {/* Speed label */}
+          <span className="mt-0.5 text-[9px] tracking-[0.12em] uppercase font-medium tabular-nums" style={{
+            color: isProcessing && avgSpeed > 0 ? 'rgba(34,197,94,0.6)' : 'rgba(255,255,255,0.2)',
           }}>
-            {phase === 'analyze' ? 'Classifying' : isWaiting ? 'Waiting...' : 'AutoHue'}
+            {isProcessing && avgSpeed > 0 ? `${avgSpeed.toFixed(1)} img/s` : isProcessing ? 'Starting...' : 'AutoHue'}
           </span>
         </div>
 
-        {/* RIGHT: Sorted folder */}
-        <div className="absolute right-2 top-1/2 -translate-y-1/2 flex flex-col items-center gap-1">
-          <div className="w-10 h-10 rounded-lg border border-white/10 flex items-center justify-center bg-white/[0.02]" style={{
-            animation: phase === 'exit' ? `ah-folder-bump ${speed.exit}ms ease-out` : 'none',
+        {/* RIGHT: Output folder */}
+        <div className="absolute right-1 top-1/2 -translate-y-1/2 flex flex-col items-center gap-1 z-10">
+          <div className="w-11 h-11 rounded-xl border border-white/10 flex items-center justify-center bg-white/[0.02]" style={{
+            animation: dots.some(d => d.x > 95) ? 'ah-folder-bump 300ms ease-out' : 'none',
           }}>
-            <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-green-400/50">
+            <svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-green-400/50">
               <path d="M2 4.5C2 3.67 2.67 3 3.5 3H6L7.5 5H12.5C13.33 5 14 5.67 14 6.5V11.5C14 12.33 13.33 13 12.5 13H3.5C2.67 13 2 12.33 2 11.5V4.5Z" />
             </svg>
           </div>
-          <span className="text-[11px] text-green-400/80 font-bold tabular-nums">{totalProcessed ?? completed.length}</span>
+          <span className="text-[12px] text-green-400/80 font-bold tabular-nums">{totalProcessed ?? 0}</span>
           <span className="text-[7px] text-white/20 tracking-widest uppercase">Sorted</span>
         </div>
 
-        {/* ── Animated thumbnail sliding across ── */}
-        {current && phase !== 'idle' && (
-          <div className="absolute top-1/2 -translate-y-1/2 z-20" style={{
-            width: 44, height: 44,
-            transition: `left ${phase === 'enter' ? speed.enter : phase === 'exit' ? speed.exit : 200}ms cubic-bezier(0.22, 1, 0.36, 1), opacity ${speed.exit}ms ease`,
-            left: phase === 'enter' ? '12%'
-              : phase === 'analyze' ? 'calc(50% - 52px)'
-              : phase === 'result' ? 'calc(50% - 52px)'
-              : 'calc(100% - 52px)',
-            opacity: phase === 'exit' ? 0.3 : 1,
-          }}>
-            <div className="w-full h-full rounded-lg overflow-hidden border-2 shadow-xl transition-all duration-200" style={{
-              borderColor: phase === 'result' ? `${swatch}88` : 'rgba(255,255,255,0.15)',
-              boxShadow: phase === 'result' ? `0 4px 25px ${swatch}44` : '0 4px 20px rgba(0,0,0,0.5)',
-            }}>
-              {current.thumb ? (
-                <img src={current.thumb} alt="" className="w-full h-full object-cover" draggable={false} />
-              ) : (
-                <div className="w-full h-full bg-white/[0.06] flex items-center justify-center">
-                  <svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.2" className="text-white/15">
-                    <rect x="2" y="2" width="12" height="12" rx="2" /><path d="M2 11L5 8L7 10L10 6L14 11" />
-                  </svg>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* ── Color result toast ── */}
-        {current && (phase === 'result' || phase === 'exit') && (
-          <div className="absolute left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 px-3 py-1.5 rounded-full border" style={{
-            top: 'calc(50% + 40px)',
-            background: 'rgba(10,10,18,0.9)',
-            borderColor: 'rgba(34,197,94,0.3)',
-            backdropFilter: 'blur(10px)',
-            animation: `ah-toast-pop ${speed.result * 0.6}ms cubic-bezier(0.22, 1, 0.36, 1)`,
-            boxShadow: `0 4px 20px rgba(0,0,0,0.4), 0 0 15px ${swatch}15`,
-          }}>
-            <svg viewBox="0 0 16 16" width="13" height="13" fill="none">
-              <circle cx="8" cy="8" r="7" fill="rgba(34,197,94,0.15)" stroke="rgba(34,197,94,0.5)" strokeWidth="1" />
-              <path d="M4.5 8.5L7 11L11.5 5.5" stroke="#22c55e" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ strokeDasharray: 24, animation: 'ah-check-draw 0.2s ease-out forwards' }} />
-            </svg>
-            <div className="w-2.5 h-2.5 rounded-full ring-1 shrink-0" style={{ backgroundColor: swatch, boxShadow: `0 0 8px ${swatch}66`, ringColor: `${swatch}44` }} />
-            <span className="text-[11px] font-semibold text-white/85 tracking-wide">{COLOR_LABELS[current.color] || current.color}</span>
-          </div>
-        )}
-
-        {/* Particles on result */}
-        {phase === 'result' && (
-          <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none z-10">
-            {Array.from({ length: 8 }).map((_, i) => {
-              const angle = (i / 8) * Math.PI * 2 + Math.random() * 0.3;
-              const dist = 25 + Math.random() * 20;
-              return (
-                <div key={i} className="absolute w-1.5 h-1.5 rounded-full" style={{
-                  backgroundColor: swatch,
-                  '--px': `${Math.cos(angle) * dist}px`,
-                  '--py': `${Math.sin(angle) * dist}px`,
-                  animation: `ah-particle-burst ${speed.result}ms ease-out forwards`,
-                  left: 0, top: 0,
-                } as React.CSSProperties} />
-              );
-            })}
-          </div>
-        )}
-
-        {/* Empty state */}
-        {phase === 'idle' && !isProcessing && results.length === 0 && (
-          <div className="absolute inset-0 flex items-center justify-center">
-            <span className="text-[11px] text-white/15 tracking-wider">Drop images to begin sorting</span>
-          </div>
-        )}
+        {/* ── Flying color dots ── */}
+        {dots.map(dot => {
+          const sw = COLOR_SWATCHES[dot.color] || '#94a3b8';
+          // Map 0-100 to actual pixel positions (left 14 to right 14 of container)
+          const leftPct = 6 + dot.x * 0.88; // 6% to 94%
+          const isNearCenter = dot.x > 38 && dot.x < 62;
+          const size = isNearCenter ? 10 : 7;
+          return (
+            <div key={dot.id} className="absolute top-1/2 -translate-y-1/2 rounded-full" style={{
+              left: `${leftPct}%`,
+              width: size,
+              height: size,
+              backgroundColor: sw,
+              boxShadow: isNearCenter ? `0 0 12px ${sw}88, 0 0 4px ${sw}44` : `0 0 6px ${sw}44`,
+              transition: 'width 150ms, height 150ms, box-shadow 150ms',
+              zIndex: isNearCenter ? 15 : 5,
+            }} />
+          );
+        })}
       </div>
 
-      {/* ── Mini Output Feed ── */}
-      {completed.length > 0 && (
-        <div className="space-y-2">
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] text-white/25 uppercase tracking-widest font-bold">Recent Output</span>
-            <span className="text-[9px] text-green-400/50 tabular-nums">{totalProcessed ?? completed.length} sorted</span>
+      {/* ── Progress bar ── */}
+      {totalImages && totalImages > 0 && (
+        <div className="px-1">
+          <div className="w-full h-1.5 rounded-full bg-white/[0.04] overflow-hidden">
+            <div className="h-full rounded-full transition-all duration-500 ease-out" style={{
+              width: `${progress}%`,
+              background: progress >= 100 ? 'linear-gradient(90deg, #22c55e, #4ade80)' : 'linear-gradient(90deg, #dc2626, #ef4444)',
+            }} />
           </div>
-          <div className="flex gap-1.5 overflow-x-auto pb-1" style={{ scrollbarWidth: 'thin', scrollbarColor: 'rgba(255,255,255,0.1) transparent' }}>
-            {completed.slice(0, 20).map((r, i) => {
-              const sw = COLOR_SWATCHES[r.color] || '#94a3b8';
-              return (
-                <div key={`${r.filename}-${i}`} className="shrink-0 flex flex-col items-center gap-1 animate-slide-in-right" style={{ animationDelay: `${i * 30}ms` }}>
-                  <div className="w-[52px] h-[38px] rounded overflow-hidden border border-white/[0.06] bg-black/30">
-                    {r.thumb ? (
-                      <img src={r.thumb} alt="" className="w-full h-full object-cover" loading="lazy" />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center">
-                        <div className="w-2 h-2 rounded-full" style={{ backgroundColor: sw }} />
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-0.5">
-                    <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: sw }} />
-                    <span className="text-[7px] text-white/40">{COLOR_LABELS[r.color] || r.color}</span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+        </div>
+      )}
+
+      {/* ── Color distribution feed ── */}
+      {recentColors.length > 0 && (
+        <div className="flex gap-0.5 overflow-hidden h-3 px-1">
+          {recentColors.slice(0, 40).map((r, i) => {
+            const sw = COLOR_SWATCHES[r.color] || '#94a3b8';
+            return (
+              <div key={r.id} className="shrink-0 rounded-sm" style={{
+                width: 6, height: 10,
+                backgroundColor: sw,
+                opacity: 1 - i * 0.02,
+                animation: i === 0 ? 'ah-dot-pop 150ms ease-out' : undefined,
+              }} />
+            );
+          })}
         </div>
       )}
     </div>

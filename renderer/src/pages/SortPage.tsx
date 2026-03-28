@@ -90,6 +90,14 @@ export default function SortPage() {
     });
   }, [showToast]);
 
+  // Load saved sort options
+  useEffect(() => {
+    const api = (window as any).electronAPI;
+    if (!api?.getSetting) return;
+    api.getSetting('sort_by_type').then((v: string | null) => { if (v === 'true') setSortByType(true); });
+    api.getSetting('detect_features').then((v: string | null) => { if (v === 'true') setDetectFeatures(true); });
+  }, []);
+
   const [phase, setPhase] = useState<Phase>('upload');
   const [files, setFiles] = useState<File[]>([]);
   const [folderPath, setFolderPath] = useState<string | null>(null);
@@ -107,6 +115,8 @@ export default function SortPage() {
     extracted: 0, imagesPerSecond: 0, avgConfidence: 0, timeSavedSeconds: 0,
     results: [], colorCounts: {},
   });
+  const [sortByType, setSortByType] = useState(false);
+  const [detectFeatures, setDetectFeatures] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -251,11 +261,18 @@ export default function SortPage() {
       // Pass the remaining daily quota so the worker stops at the limit
       const maxImages = quota.remaining === -1 ? undefined : quota.remaining;
 
+      // Send sort options to worker via settings IPC (auto-forwarded to worker process)
+      const api = (window as any).electronAPI;
+      if (api?.setSetting) {
+        await api.setSetting('sort_by_type', sortByType ? 'true' : 'false');
+        await api.setSetting('detect_features', detectFeatures ? 'true' : 'false');
+      }
+
       if (localPath) {
         const res = await fetch(`${workerUrl}/sort-local`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ inputPath: localPath, maxImages }),
+          body: JSON.stringify({ inputPath: localPath, maxImages, sortByType, detectFeatures }),
         });
         if (!res.ok) {
           const errData = await res.json().catch(() => null);
@@ -270,7 +287,7 @@ export default function SortPage() {
         data = await new Promise((resolve, reject) => {
           const xhr = new XMLHttpRequest();
           const uploadStart = Date.now();
-          xhr.open('POST', `${workerUrl}/upload`);
+          xhr.open('POST', `${workerUrl}/upload?sortByType=${sortByType}&detectFeatures=${detectFeatures}`);
           xhr.upload.onprogress = (e) => {
             if (e.lengthComputable) {
               const elapsed = (Date.now() - uploadStart) / 1000;
@@ -744,6 +761,21 @@ export default function SortPage() {
                   </button>
                 </div>
                 <p className="text-xs text-white/50 font-mono bg-white/[0.03] rounded-lg px-3 py-2 truncate">{folderPath}</p>
+                {/* Sort options */}
+                <div className="flex flex-wrap gap-3 mt-4">
+                  <label className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white/[0.03] border border-white/10 cursor-pointer hover:border-racing-500/30 transition-colors select-none">
+                    <input type="checkbox" checked={sortByType} onChange={e => setSortByType(e.target.checked)}
+                      className="w-4 h-4 rounded accent-racing-500" />
+                    <span className="text-xs text-white/60">Sort by vehicle type</span>
+                    <span className="text-[10px] text-white/25">(cars / bikes / people)</span>
+                  </label>
+                  <label className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white/[0.03] border border-white/10 cursor-pointer hover:border-racing-500/30 transition-colors select-none">
+                    <input type="checkbox" checked={detectFeatures} onChange={e => setDetectFeatures(e.target.checked)}
+                      className="w-4 h-4 rounded accent-racing-500" />
+                    <span className="text-xs text-white/60">Detect feature shots</span>
+                    <span className="text-[10px] text-white/25">(wheelstands, flames, burnouts)</span>
+                  </label>
+                </div>
                 <div className="flex flex-col items-center gap-4 mt-6">
                   <button
                     onClick={startProcessing}
@@ -798,6 +830,21 @@ export default function SortPage() {
                       placeholder="Name this batch (e.g. Powercruise Feb Friday)"
                       className="w-full bg-white/[0.03] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white/70 placeholder:text-white/20 focus:outline-none focus:border-racing-500/40 transition-colors"
                     />
+                  </div>
+                  {/* Sort options */}
+                  <div className="flex flex-wrap justify-center gap-3 w-full max-w-md">
+                    <label className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white/[0.03] border border-white/10 cursor-pointer hover:border-racing-500/30 transition-colors select-none">
+                      <input type="checkbox" checked={sortByType} onChange={e => setSortByType(e.target.checked)}
+                        className="w-4 h-4 rounded accent-racing-500" />
+                      <span className="text-xs text-white/60">Sort by vehicle type</span>
+                      <span className="text-[10px] text-white/25">(cars / bikes / people)</span>
+                    </label>
+                    <label className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white/[0.03] border border-white/10 cursor-pointer hover:border-racing-500/30 transition-colors select-none">
+                      <input type="checkbox" checked={detectFeatures} onChange={e => setDetectFeatures(e.target.checked)}
+                        className="w-4 h-4 rounded accent-racing-500" />
+                      <span className="text-xs text-white/60">Detect feature shots</span>
+                      <span className="text-[10px] text-white/25">(wheelstands, flames, burnouts)</span>
+                    </label>
                   </div>
                   <button
                     onClick={startProcessing}
