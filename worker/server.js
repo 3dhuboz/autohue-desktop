@@ -2283,8 +2283,9 @@ app.post('/sort-local', async (req, res) => {
                 }
 
                 // ── BATCH + CONCURRENT PROCESSING ──
-                // Concurrency = number of API keys (each worker uses its own key)
-                const BATCH_CONCURRENCY = Math.max(3, OPENROUTER_KEYS.length);
+                // Concurrency limited to prevent OOM — Jimp uses ~10MB per image in memory
+                // With sharp: could safely do 5+ concurrent. Without sharp: keep it low.
+                const BATCH_CONCURRENCY = sharp ? Math.max(3, OPENROUTER_KEYS.length) : 2;
                 const activeBatchSize = getVisionBatchSize();
                 const activeEngine = getActiveEngine();
                 console.log(`[${sessionId}] Engine: ${activeEngine}, batch: ${activeBatchSize}, concurrency: ${BATCH_CONCURRENCY}`);
@@ -2309,7 +2310,9 @@ app.post('/sort-local', async (req, res) => {
                 }
 
                 function preReadAhead(count) {
-                    const upcoming = pendingFiles.slice(0, count);
+                    // Limit pre-read to prevent OOM when using Jimp (no sharp)
+                    const maxAhead = sharp ? count : Math.min(count, 3);
+                    const upcoming = pendingFiles.slice(0, maxAhead);
                     for (const fp of upcoming) {
                         if (!preReadCache.has(fp)) {
                             preReadCache.set(fp, prepareImageForApi(fp).catch(() => null));
